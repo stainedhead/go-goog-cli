@@ -266,6 +266,67 @@ func SetPermissions() error {
 	return nil
 }
 
+// ErrAccountNotFound is returned when the requested account is not found.
+var ErrAccountNotFound = fmt.Errorf("account not found")
+
+// GetAccount retrieves an account configuration by alias.
+func (c *Config) GetAccount(alias string) (*AccountConfig, error) {
+	acc, ok := c.Accounts[alias]
+	if !ok {
+		return nil, ErrAccountNotFound
+	}
+	return &acc, nil
+}
+
+// SetValue sets a configuration value by key path (e.g., "mail.page_size").
+func (c *Config) SetValue(key, value string) error {
+	switch key {
+	case "default_account":
+		c.DefaultAccount = value
+	case "default_format":
+		c.DefaultFormat = value
+	case "timezone":
+		c.Timezone = value
+	case "mail.default_label":
+		c.Mail.DefaultLabel = value
+	case "mail.page_size":
+		var pageSize int
+		if _, err := fmt.Sscanf(value, "%d", &pageSize); err != nil {
+			return fmt.Errorf("invalid page_size: %w", err)
+		}
+		c.Mail.PageSize = pageSize
+	case "calendar.default_calendar":
+		c.Calendar.DefaultCalendar = value
+	case "calendar.week_start":
+		c.Calendar.WeekStart = value
+	default:
+		return fmt.Errorf("unknown config key: %s", key)
+	}
+	return nil
+}
+
+// GetValue retrieves a configuration value by key path.
+func (c *Config) GetValue(key string) (string, error) {
+	switch key {
+	case "default_account":
+		return c.DefaultAccount, nil
+	case "default_format":
+		return c.DefaultFormat, nil
+	case "timezone":
+		return c.Timezone, nil
+	case "mail.default_label":
+		return c.Mail.DefaultLabel, nil
+	case "mail.page_size":
+		return fmt.Sprintf("%d", c.Mail.PageSize), nil
+	case "calendar.default_calendar":
+		return c.Calendar.DefaultCalendar, nil
+	case "calendar.week_start":
+		return c.Calendar.WeekStart, nil
+	default:
+		return "", fmt.Errorf("unknown config key: %s", key)
+	}
+}
+
 // stringToTimeHookFunc returns a mapstructure decode hook that converts
 // strings to time.Time using RFC3339 format.
 func stringToTimeHookFunc() mapstructure.DecodeHookFunc {
