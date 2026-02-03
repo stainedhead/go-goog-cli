@@ -1,0 +1,333 @@
+# AGENTS.md
+
+Rules and guidelines for AI agents working on this Golang CLI application.
+
+## Architecture: Clean Architecture
+
+This project follows Clean Architecture principles with strict dependency rules.
+
+### Layer Structure
+
+```
+internal/
+├── domain/          # Entities and business rules (innermost, no dependencies)
+├── usecase/         # Application business logic (depends only on domain)
+├── adapter/         # Interface adapters: CLI handlers, repositories (depends on usecase)
+└── infrastructure/  # External concerns: API clients, file I/O (outermost)
+
+cmd/
+└── <app>/           # Application entry point, dependency injection
+```
+
+### Dependency Rules
+
+1. **Domain Layer**: Pure business entities and interfaces. No external imports except stdlib.
+2. **Use Case Layer**: Orchestrates domain entities. Defines repository/service interfaces.
+3. **Adapter Layer**: Implements interfaces defined in use case layer. Converts external data to domain models.
+4. **Infrastructure Layer**: Concrete implementations for external services, databases, APIs.
+
+Dependencies flow inward only. Inner layers define interfaces; outer layers implement them.
+
+## Development Methodology: TDD
+
+Follow strict Test-Driven Development:
+
+### Red-Green-Refactor Cycle
+
+1. **Red**: Write a failing test that defines expected behavior
+2. **Green**: Write minimal code to make the test pass
+3. **Refactor**: Improve code quality while keeping tests green
+
+### Test Organization
+
+```
+<package>/
+├── <file>.go
+└── <file>_test.go    # Tests in same package for white-box testing
+```
+
+For black-box testing, use `<package>_test` package name.
+
+### Test Commands
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with coverage
+go test -cover ./...
+
+# Run specific test
+go test -run TestFunctionName ./path/to/package
+
+# Run tests with verbose output
+go test -v ./...
+
+# Generate coverage report
+go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
+```
+
+## Code Quality Standards
+
+### Build and Run
+
+**All builds output to the `bin/` directory. Always run the executable from there.**
+
+```bash
+# Build the executable to bin/
+go build -o bin/goog ./cmd/goog
+
+# Run the executable from bin/
+./bin/goog --help
+./bin/goog auth status
+./bin/goog mail list --format json
+
+# Build and run in one command
+go build -o bin/goog ./cmd/goog && ./bin/goog --help
+```
+
+**Rules:**
+- Never run `go run ./cmd/goog` in production testing—always build first
+- The `bin/` directory is gitignored; binaries are never committed
+- Use `./bin/goog` for all manual testing and verification
+- Cross-compile for other platforms into `bin/` as well:
+
+```bash
+# Cross-compile examples
+GOOS=linux GOARCH=amd64 go build -o bin/goog-linux-amd64 ./cmd/goog
+GOOS=windows GOARCH=amd64 go build -o bin/goog-windows-amd64.exe ./cmd/goog
+GOOS=darwin GOARCH=arm64 go build -o bin/goog-darwin-arm64 ./cmd/goog
+```
+
+### Lint Commands
+
+```bash
+# Format code
+go fmt ./...
+
+# Vet for suspicious constructs
+go vet ./...
+
+# Run linter (install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
+golangci-lint run
+
+# Tidy dependencies
+go mod tidy
+```
+
+### Idiomatic Go Practices
+
+- **Naming**: Use MixedCaps, not underscores. Acronyms stay uppercase (HTTPServer, not HttpServer).
+- **Errors**: Return errors as the last return value. Wrap errors with context using `fmt.Errorf("context: %w", err)`.
+- **Interfaces**: Define interfaces where they are used, not where implemented. Keep interfaces small.
+- **Packages**: Package names are lowercase, single words. Avoid `util`, `common`, `helpers`.
+- **Documentation**: All exported types and functions have doc comments starting with the name.
+
+### Code Generation Workflow
+
+1. Generate initial code structure to satisfy interfaces
+2. Run tests - expect failures
+3. Implement until tests pass
+4. Refactor for clarity, performance, and maintainability
+5. Verify tests still pass
+6. Run linters and fix issues
+
+## Quality Gates
+
+**All quality gates must pass before completing any development task.**
+
+### Pre-Completion Checklist
+
+Run these commands in order. All must succeed with zero errors:
+
+```bash
+# 1. Format code (auto-fixes formatting issues)
+go fmt ./...
+
+# 2. Tidy dependencies (ensures go.mod/go.sum are clean)
+go mod tidy
+
+# 3. Vet for suspicious constructs
+go vet ./...
+
+# 4. Run linter (catches bugs, style issues, complexity)
+golangci-lint run
+
+# 5. Run all tests
+go test ./...
+
+# 6. Build the executable to bin/
+go build -o bin/goog ./cmd/goog
+
+# 7. Verify the executable runs
+./bin/goog --help
+```
+
+### Gate Failure Policy
+
+- **Format/Tidy**: Auto-fix and continue
+- **Vet warnings**: Must fix before proceeding
+- **Lint errors**: Must fix before proceeding
+- **Lint warnings**: Fix if trivial, document if complex (create follow-up task)
+- **Test failures**: Must fix before proceeding
+- **Build failures**: Must fix before proceeding
+- **Run failures**: Must fix before proceeding (executable must run without panic/crash)
+
+### Quick Validation Script
+
+For rapid iteration, use this combined command:
+
+```bash
+go fmt ./... && go mod tidy && go vet ./... && golangci-lint run && go test ./... && go build -o bin/goog ./cmd/goog && ./bin/goog --help
+```
+
+### golangci-lint Configuration
+
+If `.golangci.yml` doesn't exist, create with sensible defaults:
+
+```yaml
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck      # Check error returns
+    - gosimple      # Simplify code
+    - govet         # Suspicious constructs
+    - ineffassign   # Unused assignments
+    - staticcheck   # Static analysis
+    - unused        # Unused code
+    - gofmt         # Formatting
+    - goimports     # Import organization
+    - misspell      # Spelling errors
+    - gocritic      # Code quality
+
+linters-settings:
+  errcheck:
+    check-blank: true
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+```
+
+## Documentation Maintenance
+
+### Required Files
+
+Maintain these documentation files with every change cycle:
+
+| File | Purpose |
+|------|---------|
+| `README.md` | Project overview, quick start, usage examples |
+| `documentation/product-summary.md` | High-level product description and goals |
+| `documentation/product-details.md` | Feature specifications and user workflows |
+| `documentation/technical-details.md` | Architecture decisions, API docs, data flows |
+
+### Documentation Standards
+
+- **Concise**: No filler words. Every sentence adds value.
+- **Current**: Update docs in the same commit as code changes.
+- **Dual-audience**: Write for both humans and AI agents to understand quickly.
+- **Structured**: Use consistent headings, lists, and code blocks.
+
+## Agent Workflow
+
+When making changes:
+
+1. **Understand**: Read relevant documentation and code before modifying
+2. **Plan**: Identify affected components across all architectural layers
+3. **Test First**: Write or update tests before implementation
+4. **Implement**: Make minimal changes to pass tests
+5. **Refine**: Improve code quality
+6. **Quality Gates**: Run all quality gate checks (format, tidy, vet, lint, test, build)
+7. **Fix Issues**: Resolve any failures from quality gates
+8. **Document**: Update all affected documentation files
+9. **Final Verify**: Re-run quality gates to confirm all pass
+
+**IMPORTANT**: Never mark a task complete until all quality gates pass. The executable must build successfully to `bin/goog` and run without errors (`./bin/goog --help`).
+
+## Git Configuration
+
+### Required .gitignore
+
+Every Go project must have a `.gitignore` file. Create one if it doesn't exist:
+
+```gitignore
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+coverage.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+
+# Environment and secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Vendor (if not committing)
+# vendor/
+```
+
+**Rule**: Before first commit, verify `.gitignore` exists and covers build outputs (`bin/`), test artifacts, and IDE files.
+
+## Project Structure Reference
+
+```
+.
+├── CLAUDE.md              # References this file
+├── AGENTS.md              # This file - agent guidelines
+├── README.md              # Project documentation
+├── .gitignore             # Git ignore rules (required)
+├── .golangci.yml          # Linter configuration
+├── go.mod                 # Go module definition
+├── go.sum                 # Dependency checksums
+├── cmd/
+│   └── goog/
+│       └── main.go        # Entry point
+├── internal/
+│   ├── domain/            # Business entities
+│   ├── usecase/           # Application logic
+│   ├── adapter/
+│   │   ├── cli/           # CLI command handlers
+│   │   └── repository/    # Data access implementations
+│   └── infrastructure/    # External service clients
+├── pkg/                   # Public libraries (if any)
+├── documentation/
+│   ├── product-summary.md
+│   ├── product-details.md
+│   └── technical-details.md
+└── bin/                   # Build output (gitignored) - run ./bin/goog
+```
