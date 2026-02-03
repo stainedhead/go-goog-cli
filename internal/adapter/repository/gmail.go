@@ -44,8 +44,32 @@ type GmailRepository struct {
 	baseBackoff time.Duration
 }
 
-// Compile-time interface compliance check.
-var _ mail.MessageRepository = (*GmailRepository)(nil)
+// Compile-time interface compliance checks.
+var (
+	_ mail.MessageRepository = (*GmailRepository)(nil)
+	_ mail.DraftRepository   = (*GmailDraftRepository)(nil)
+	_ mail.LabelRepository   = (*GmailLabelRepository)(nil)
+)
+
+// GmailDraftRepository wraps GmailRepository to implement DraftRepository.
+type GmailDraftRepository struct {
+	*GmailRepository
+}
+
+// NewGmailDraftRepository creates a new GmailDraftRepository.
+func NewGmailDraftRepository(repo *GmailRepository) *GmailDraftRepository {
+	return &GmailDraftRepository{GmailRepository: repo}
+}
+
+// GmailLabelRepository wraps GmailRepository to implement LabelRepository.
+type GmailLabelRepository struct {
+	*GmailRepository
+}
+
+// NewGmailLabelRepository creates a new GmailLabelRepository.
+func NewGmailLabelRepository(repo *GmailRepository) *GmailLabelRepository {
+	return &GmailLabelRepository{GmailRepository: repo}
+}
 
 // NewGmailRepository creates a new GmailRepository with the given OAuth2 token source.
 func NewGmailRepository(ctx context.Context, tokenSource oauth2.TokenSource) (*GmailRepository, error) {
@@ -594,4 +618,324 @@ func retryWithBackoff[T any](ctx context.Context, maxRetries int, baseBackoff ti
 // isRetryableError determines if an error should trigger a retry.
 func isRetryableError(err error) bool {
 	return errors.Is(err, ErrTemporary) || errors.Is(err, ErrRateLimited)
+}
+
+// =============================================================================
+// DraftRepository Implementation (GmailDraftRepository)
+// =============================================================================
+
+// List retrieves a list of drafts.
+func (r *GmailDraftRepository) List(ctx context.Context, opts mail.ListOptions) (*mail.ListResult[*mail.Draft], error) {
+	call := r.service.Users.Drafts.List(r.userID)
+
+	if opts.MaxResults > 0 {
+		call = call.MaxResults(int64(opts.MaxResults))
+	}
+	if opts.PageToken != "" {
+		call = call.PageToken(opts.PageToken)
+	}
+	if opts.Query != "" {
+		call = call.Q(opts.Query)
+	}
+
+	response, err := call.Context(ctx).Do()
+	if err != nil {
+		return nil, r.handleError(err)
+	}
+
+	drafts := make([]*mail.Draft, 0, len(response.Drafts))
+	for _, gmailDraft := range response.Drafts {
+		// Fetch full draft details
+		fullDraft, err := r.Get(ctx, gmailDraft.Id)
+		if err != nil {
+			// Create minimal draft on error
+			drafts = append(drafts, &mail.Draft{ID: gmailDraft.Id})
+			continue
+		}
+		drafts = append(drafts, fullDraft)
+	}
+
+	return &mail.ListResult[*mail.Draft]{
+		Items:         drafts,
+		NextPageToken: response.NextPageToken,
+		Total:         int(response.ResultSizeEstimate),
+	}, nil
+}
+
+// Get retrieves a single draft by ID.
+func (r *GmailDraftRepository) Get(ctx context.Context, id string) (*mail.Draft, error) {
+	gmailDraft, err := r.service.Users.Drafts.Get(r.userID, id).
+		Format(gmailMessageFormat).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleDraftError(err)
+	}
+
+	return gmailDraftToDomain(gmailDraft), nil
+}
+
+// Create creates a new draft.
+func (r *GmailDraftRepository) Create(ctx context.Context, draft *mail.Draft) (*mail.Draft, error) {
+	if draft.Message == nil {
+		return nil, fmt.Errorf("%w: draft must have a message", ErrBadRequest)
+	}
+
+	raw := buildMimeMessage(draft.Message)
+	encodedRaw := base64.URLEncoding.EncodeToString(raw)
+
+	gmailDraft := &gmail.Draft{
+		Message: &gmail.Message{
+			Raw: encodedRaw,
+		},
+	}
+
+	created, err := r.service.Users.Drafts.Create(r.userID, gmailDraft).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleError(err)
+	}
+
+	// Fetch the created draft to get full details
+	return r.Get(ctx, created.Id)
+}
+
+// Update updates an existing draft.
+func (r *GmailDraftRepository) Update(ctx context.Context, draft *mail.Draft) (*mail.Draft, error) {
+	if draft.Message == nil {
+		return nil, fmt.Errorf("%w: draft must have a message", ErrBadRequest)
+	}
+
+	raw := buildMimeMessage(draft.Message)
+	encodedRaw := base64.URLEncoding.EncodeToString(raw)
+
+	gmailDraft := &gmail.Draft{
+		Message: &gmail.Message{
+			Raw: encodedRaw,
+		},
+	}
+
+	updated, err := r.service.Users.Drafts.Update(r.userID, draft.ID, gmailDraft).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleDraftError(err)
+	}
+
+	// Fetch the updated draft to get full details
+	return r.Get(ctx, updated.Id)
+}
+
+// Send sends a draft.
+func (r *GmailDraftRepository) Send(ctx context.Context, id string) (*mail.Message, error) {
+	gmailDraft := &gmail.Draft{
+		Id: id,
+	}
+
+	sent, err := r.service.Users.Drafts.Send(r.userID, gmailDraft).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleDraftError(err)
+	}
+
+	// Fetch the sent message to get full details using the message API
+	gmailMsg, err := r.service.Users.Messages.Get(r.userID, sent.Id).
+		Format(gmailMessageFormat).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleError(err)
+	}
+
+	return gmailMessageToDomain(gmailMsg), nil
+}
+
+// Delete deletes a draft.
+func (r *GmailDraftRepository) Delete(ctx context.Context, id string) error {
+	err := r.service.Users.Drafts.Delete(r.userID, id).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return r.handleDraftError(err)
+	}
+	return nil
+}
+
+// handleDraftError maps Gmail API errors to domain draft errors.
+func (r *GmailRepository) handleDraftError(err error) error {
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.Code == http.StatusNotFound {
+			return fmt.Errorf("%w: %s", mail.ErrDraftNotFound, apiErr.Message)
+		}
+		return mapGmailError(apiErr.Code, apiErr.Message)
+	}
+	return fmt.Errorf("gmail error: %w", err)
+}
+
+// gmailDraftToDomain converts a Gmail API draft to a domain Draft.
+func gmailDraftToDomain(draft *gmail.Draft) *mail.Draft {
+	if draft == nil {
+		return nil
+	}
+
+	result := &mail.Draft{
+		ID: draft.Id,
+	}
+
+	if draft.Message != nil {
+		result.Message = gmailMessageToDomain(draft.Message)
+	}
+
+	return result
+}
+
+// =============================================================================
+// LabelRepository Implementation (GmailLabelRepository)
+// =============================================================================
+
+// List retrieves all labels.
+func (r *GmailLabelRepository) List(ctx context.Context) ([]*mail.Label, error) {
+	response, err := r.service.Users.Labels.List(r.userID).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleError(err)
+	}
+
+	labels := make([]*mail.Label, 0, len(response.Labels))
+	for _, gmailLabel := range response.Labels {
+		labels = append(labels, gmailLabelToDomain(gmailLabel))
+	}
+
+	return labels, nil
+}
+
+// Get retrieves a single label by ID.
+func (r *GmailLabelRepository) Get(ctx context.Context, id string) (*mail.Label, error) {
+	gmailLabel, err := r.service.Users.Labels.Get(r.userID, id).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleLabelError(err)
+	}
+
+	return gmailLabelToDomain(gmailLabel), nil
+}
+
+// GetByName retrieves a label by name.
+func (r *GmailLabelRepository) GetByName(ctx context.Context, name string) (*mail.Label, error) {
+	labels, err := r.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, label := range labels {
+		if label.Name == name {
+			return label, nil
+		}
+	}
+
+	return nil, fmt.Errorf("%w: %s", mail.ErrLabelNotFound, name)
+}
+
+// Create creates a new label.
+func (r *GmailLabelRepository) Create(ctx context.Context, label *mail.Label) (*mail.Label, error) {
+	gmailLabel := domainLabelToGmail(label)
+
+	created, err := r.service.Users.Labels.Create(r.userID, gmailLabel).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleError(err)
+	}
+
+	return gmailLabelToDomain(created), nil
+}
+
+// Update updates an existing label.
+func (r *GmailLabelRepository) Update(ctx context.Context, label *mail.Label) (*mail.Label, error) {
+	gmailLabel := domainLabelToGmail(label)
+
+	updated, err := r.service.Users.Labels.Update(r.userID, label.ID, gmailLabel).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleLabelError(err)
+	}
+
+	return gmailLabelToDomain(updated), nil
+}
+
+// Delete deletes a label.
+func (r *GmailLabelRepository) Delete(ctx context.Context, id string) error {
+	err := r.service.Users.Labels.Delete(r.userID, id).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return r.handleLabelError(err)
+	}
+	return nil
+}
+
+// handleLabelError maps Gmail API errors to domain label errors.
+func (r *GmailRepository) handleLabelError(err error) error {
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.Code == http.StatusNotFound {
+			return fmt.Errorf("%w: %s", mail.ErrLabelNotFound, apiErr.Message)
+		}
+		return mapGmailError(apiErr.Code, apiErr.Message)
+	}
+	return fmt.Errorf("gmail error: %w", err)
+}
+
+// gmailLabelToDomain converts a Gmail API label to a domain Label.
+func gmailLabelToDomain(label *gmail.Label) *mail.Label {
+	if label == nil {
+		return nil
+	}
+
+	result := &mail.Label{
+		ID:                    label.Id,
+		Name:                  label.Name,
+		Type:                  label.Type,
+		MessageListVisibility: label.MessageListVisibility,
+		LabelListVisibility:   label.LabelListVisibility,
+	}
+
+	if label.Color != nil {
+		result.Color = &mail.LabelColor{
+			Background: label.Color.BackgroundColor,
+			Text:       label.Color.TextColor,
+		}
+	}
+
+	return result
+}
+
+// domainLabelToGmail converts a domain Label to a Gmail API label.
+func domainLabelToGmail(label *mail.Label) *gmail.Label {
+	if label == nil {
+		return nil
+	}
+
+	result := &gmail.Label{
+		Id:                    label.ID,
+		Name:                  label.Name,
+		Type:                  label.Type,
+		MessageListVisibility: label.MessageListVisibility,
+		LabelListVisibility:   label.LabelListVisibility,
+	}
+
+	if label.Color != nil {
+		result.Color = &gmail.LabelColor{
+			BackgroundColor: label.Color.Background,
+			TextColor:       label.Color.Text,
+		}
+	}
+
+	return result
 }
