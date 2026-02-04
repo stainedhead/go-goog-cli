@@ -54,6 +54,7 @@ goog mail delete <id> --confirm    # Permanent delete
 goog mail mark <id> --read         # Mark as read
 goog mail mark <id> --star         # Add star
 goog mail modify <id> --add-labels IMPORTANT
+goog mail move <id> --to "Work"    # Move to specific label
 ```
 
 Compose:
@@ -93,6 +94,8 @@ goog thread list                   # List conversations
 goog thread list --labels INBOX --max-results 50
 goog thread show <id>              # Full conversation
 goog thread trash <id>             # Trash entire thread
+goog thread untrash <id>           # Restore thread from trash
+goog thread delete <id> --confirm  # Permanently delete thread
 goog thread modify <id> --add-labels Archive --remove-labels INBOX
 ```
 
