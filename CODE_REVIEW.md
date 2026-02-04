@@ -4,7 +4,7 @@
 
 This document outlines the findings from a comprehensive code and design review against the PRD requirements, including test coverage analysis and a prioritized improvement plan.
 
-**Status: COMPLETED** - Two loops of code improvements implemented.
+**Status: COMPLETED** - Four loops of code improvements plus DI refactoring implemented.
 
 ## 1. Test Coverage Analysis
 
@@ -23,7 +23,7 @@ This document outlines the findings from a comprehensive code and design review 
 | adapter/repository | 31.6% | Critical |
 | adapter/cli | 18.4% | Critical |
 
-### After Improvements (Final - Four Loops Completed)
+### After Improvements (Final - Four Loops + DI Refactoring Completed)
 
 | Package | Before | After | Change | Status |
 |---------|--------|-------|--------|--------|
@@ -36,9 +36,9 @@ This document outlines the findings from a comprehensive code and design review 
 | adapter/presenter | 82.7% | **93.7%** | **+11.0%** | ✅ Excellent |
 | **infrastructure/config** | 52.8% | **80.1%** | **+27.3%** | ✅ Good |
 | **adapter/repository** | 31.6% | **90.9%** | **+59.3%** | ✅ Exceeds 90% |
-| **adapter/cli** | 18.4% | **60.6%** | **+42.2%** | ✅ Good Progress |
+| **adapter/cli** | 18.4% | **83.8%** | **+65.4%** | ✅ Very Good |
 
-**Total coverage improvement: +303.6 percentage points across all packages**
+**Total coverage improvement: +326.8 percentage points across all packages**
 
 ## 2. PRD Compliance Gap Analysis
 
@@ -197,18 +197,20 @@ All core Gmail and Calendar operations are implemented:
 
 After improvements:
 - [x] No critical security issues
-- [x] adapter/repository coverage >= 60% (achieved 75.6%)
+- [x] adapter/repository coverage >= 60% (achieved 90.9% - exceeds goal)
 - [x] infrastructure/auth coverage >= 90% (achieved 93.3%)
 - [x] infrastructure/keyring coverage >= 90% (achieved 91.3%)
-- [x] usecase/account coverage >= 80% (achieved 83.3%)
-- [x] All tests passing (100+ new tests added)
+- [x] usecase/account coverage >= 80% (achieved 90.6% - exceeds goal)
+- [x] All tests passing (367+ new tests added)
 - [x] No code duplication in repository factories
 - [x] Consistent validation patterns
 - [x] No silent failures in critical paths
 - [x] Dependency injection infrastructure for CLI testing
 - [x] HTTP test server infrastructure for repository testing
-- [ ] adapter/cli coverage >= 60% (achieved 34.2% - requires more command tests)
-- [ ] infrastructure/config coverage >= 80% (achieved 78.8% - limited by platform-specific code)
+- [x] adapter/cli coverage >= 60% (achieved 83.8% - significantly exceeds goal)
+- [x] infrastructure/config coverage >= 80% (achieved 80.1%)
+- [x] All CLI commands use consistent DI pattern
+- [x] Comprehensive execution tests for all major command groups
 
 ## 7. Completed Improvements
 
@@ -295,13 +297,54 @@ After improvements:
 - config: 78.8% → 80.1% (+1.3 percentage points)
 - cli: 58.0% → 60.6% (+2.6 percentage points)
 
-**Final Achievements:**
-- 3 packages exceeding 90% coverage: auth (93.3%), keyring (91.3%), usecase/account (90.6%), repository (90.9%), presenter (93.7%)
+**Achievements After Loop 4:**
+- 5 packages exceeding 90% coverage: auth (93.3%), keyring (91.3%), usecase/account (90.6%), repository (90.9%), presenter (93.7%)
 - Domain packages at 100%: account, calendar, mail
 - CLI coverage improved from 18.4% to 60.6% (+42.2 percentage points)
 - 100% coverage for: draft run functions, label run functions, thread run functions, mail actions, calendar helpers
 - Infrastructure coverage: config (80.1%)
-- Total of 300+ new tests added across all loops
+- Total of 300+ new tests added across all 4 loops
+
+### DI Refactoring Session: Complete CLI Test Coverage (Session 5)
+
+After Loop 4, CLI coverage was at 60.6%. The remaining gap was due to commands not using the dependency injection framework. Three parallel worker threads tackled this issue.
+
+**Worker Thread 1 - Account/Auth Commands (Completed):**
+- Extended `AccountService` interface with Add, Remove, Switch, Rename methods
+- Added `getAccountServiceFromDeps()` helper function in service_factory.go
+- Refactored all 6 account.go RunE functions to use DI
+- Refactored all 4 auth.go RunE functions to use DI
+- Removed direct calls to `config.Load()` and `keyring.NewStore()`
+- Added 22 comprehensive execution tests (12 account + 10 auth)
+
+**Worker Thread 2 - Mail Compose Commands (Completed):**
+- Fixed `TokenManager` interface type issues in dependencies.go
+- Refactored `runMailSend` to use `getMessageRepositoryFromDeps()`
+- Refactored `runMailReply` to use `getMessageRepositoryFromDeps()`
+- Refactored `runMailForward` to use `getMessageRepositoryFromDeps()`
+- Added 10 new execution tests for send/reply/forward with error paths
+
+**Worker Thread 3 - Calendar CRUD Commands (Completed):**
+- Refactored cal_events.go (create, update, delete) to use `getEventRepositoryFromDeps()`
+- Refactored cal_calendars.go (9 functions) to use `getCalendarRepositoryFromDeps()`
+- Refactored cal_acl.go (list, add, remove) to use `getACLRepositoryFromDeps()`
+- Refactored cal_instances.go to use `getEventRepositoryFromDeps()`
+- Added 35 execution tests (11 events + 11 calendars + 7 ACL + 6 instances)
+
+**Test Coverage (DI Refactoring):**
+- cli: 60.6% → 83.8% (+23.2 percentage points)
+- Account commands: 0% → 83-100% coverage
+- Auth commands: 0% → 90-100% coverage
+- Mail compose: 16-31% → 93-95% coverage
+- Calendar CRUD: 0% → 73-93% coverage
+
+**Final Achievements:**
+- CLI package reached 83.8% coverage (near 90% goal)
+- All CLI commands now use consistent DI pattern
+- 67 new execution tests added in DI refactoring
+- Total of 367+ new tests added across all sessions
+- 6 packages exceeding 90% coverage
+- Overall project coverage: 76.3% of all statements
 
 ### Files Created/Modified
 
@@ -356,4 +399,23 @@ After improvements:
 - `internal/adapter/cli/cal_events_test.go` - Added 300+ lines of helper tests
 - `internal/adapter/cli/config_test.go` - Added comprehensive config command tests
 
-**Total Test Count:** 300+ new tests added across all 4 loops
+**Modified Files (DI Refactoring):**
+- `internal/adapter/cli/account.go` - Refactored to use getAccountServiceFromDeps()
+- `internal/adapter/cli/account_test.go` - Added 12 execution tests
+- `internal/adapter/cli/auth.go` - Refactored to use getAccountServiceFromDeps()
+- `internal/adapter/cli/auth_test.go` - Added 10 execution tests
+- `internal/adapter/cli/mail_compose.go` - Refactored to use getMessageRepositoryFromDeps()
+- `internal/adapter/cli/mail_compose_mock_test.go` - Added 10 execution tests
+- `internal/adapter/cli/cal_events.go` - Refactored to use getEventRepositoryFromDeps()
+- `internal/adapter/cli/cal_events_test.go` - Added 11 execution tests
+- `internal/adapter/cli/cal_calendars.go` - Refactored to use getCalendarRepositoryFromDeps()
+- `internal/adapter/cli/cal_calendars_test.go` - Added 11 execution tests
+- `internal/adapter/cli/cal_acl.go` - Refactored to use getACLRepositoryFromDeps()
+- `internal/adapter/cli/cal_acl_test.go` - Added 7 execution tests
+- `internal/adapter/cli/cal_instances.go` - Refactored to use getEventRepositoryFromDeps()
+- `internal/adapter/cli/cal_instances_test.go` - Added 6 execution tests
+- `internal/adapter/cli/dependencies.go` - Extended AccountService interface, fixed TokenManager
+- `internal/adapter/cli/dependencies_test.go` - Updated mocks
+- `internal/adapter/cli/service_factory.go` - Added getAccountServiceFromDeps()
+
+**Total Test Count:** 367+ new tests added across all 5 sessions (4 loops + DI refactoring)
