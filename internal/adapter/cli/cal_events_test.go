@@ -1478,3 +1478,401 @@ func TestCalDeleteCmd_WithoutConfirm(t *testing.T) {
 		t.Errorf("expected error message about --confirm, got: %s", errOutput)
 	}
 }
+
+// =============================================================================
+// Additional Edge Case Tests for Helper Functions
+// =============================================================================
+
+func TestParseRelativeDate_NegativeOffset(t *testing.T) {
+	// Test with negative offset (yesterday - not typically used, but should work)
+	result, err := parseRelativeDate("yesterday", -1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	yesterday := time.Now().AddDate(0, 0, -1)
+	if result.Year() != yesterday.Year() ||
+		result.Month() != yesterday.Month() ||
+		result.Day() != yesterday.Day() {
+		t.Errorf("expected yesterday's date, got %v", result)
+	}
+}
+
+func TestParseRelativeDate_LargeOffset(t *testing.T) {
+	// Test with large offset (far future)
+	result, err := parseRelativeDate("future", 365)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	future := time.Now().AddDate(0, 0, 365)
+	if result.Year() != future.Year() ||
+		result.Month() != future.Month() ||
+		result.Day() != future.Day() {
+		t.Errorf("expected date 365 days from now, got %v", result)
+	}
+}
+
+func TestParseRelativeDate_WithExtraSpaces(t *testing.T) {
+	// Test with extra spaces in input
+	result, err := parseRelativeDate("tomorrow   3pm", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tomorrow := time.Now().AddDate(0, 0, 1)
+	if result.Year() != tomorrow.Year() ||
+		result.Month() != tomorrow.Month() ||
+		result.Day() != tomorrow.Day() ||
+		result.Hour() != 15 {
+		t.Errorf("expected tomorrow at 3pm, got %v", result)
+	}
+}
+
+func TestParseRelativeDate_CaseInsensitive(t *testing.T) {
+	// Test that TODAY, ToMoRrOw, etc. work
+	tests := []struct {
+		name   string
+		input  string
+		offset int
+	}{
+		{"uppercase TODAY", "TODAY", 0},
+		{"mixed case ToMoRrOw", "ToMoRrOw", 1},
+		{"uppercase TOMORROW", "TOMORROW", 1},
+		{"mixed case tOdAy", "tOdAy", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseRelativeDate(tt.input, tt.offset)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			expected := time.Now().AddDate(0, 0, tt.offset)
+			if result.Year() != expected.Year() ||
+				result.Month() != expected.Month() ||
+				result.Day() != expected.Day() {
+				t.Errorf("expected date %v, got %v", expected, result)
+			}
+		})
+	}
+}
+
+func TestParseTimeOfDay_InvalidFormats(t *testing.T) {
+	// Additional invalid format tests
+	tests := []string{
+		"25pm",
+		// Note: "0pm" is actually valid (converts to 12pm)
+		"-1am",
+		"12:60am",
+		"99:99",
+		"abc:def",
+		"12:30:45pm", // Seconds not supported in am/pm format
+		":",
+		"12:",
+		":30",
+		"1200",  // No colon
+		"12.30", // Wrong separator
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			_, _, err := parseTimeOfDay(input)
+			if err == nil {
+				t.Errorf("expected error for invalid input %q, got nil", input)
+			}
+		})
+	}
+}
+
+func TestParseTimeOfDay_BoundaryTimes(t *testing.T) {
+	tests := []struct {
+		input   string
+		expectH int
+		expectM int
+	}{
+		{"0:00", 0, 0},
+		{"0:01", 0, 1},
+		{"0:59", 0, 59},
+		{"23:00", 23, 0},
+		{"23:59", 23, 59},
+		{"12:00am", 0, 0},
+		{"12:00pm", 12, 0},
+		{"12:59am", 0, 59},
+		{"12:59pm", 12, 59},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			h, m, err := parseTimeOfDay(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tt.input, err)
+			}
+			if h != tt.expectH || m != tt.expectM {
+				t.Errorf("expected %02d:%02d, got %02d:%02d", tt.expectH, tt.expectM, h, m)
+			}
+		})
+	}
+}
+
+func TestParseAttendees_SpecialEmailFormats(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []string
+		expectErr bool
+		expected  int
+	}{
+		{
+			name:     "email with multiple dots",
+			input:    []string{"first.middle.last@example.com"},
+			expected: 1,
+		},
+		{
+			name:     "email with plus sign",
+			input:    []string{"user+tag123@example.com"},
+			expected: 1,
+		},
+		{
+			name:     "email with numbers",
+			input:    []string{"user123@example456.com"},
+			expected: 1,
+		},
+		{
+			name:     "email with hyphens",
+			input:    []string{"first-last@my-company.com"},
+			expected: 1,
+		},
+		{
+			name:     "email with underscore",
+			input:    []string{"user_name@example.com"},
+			expected: 1,
+		},
+		{
+			name:      "email without @ sign",
+			input:     []string{"userexample.com"},
+			expectErr: true,
+		},
+		{
+			name:      "email with space",
+			input:     []string{"user @example.com"},
+			expectErr: true,
+		},
+		{
+			name:      "email with @ at start",
+			input:     []string{"@example.com"},
+			expectErr: true,
+		},
+		{
+			name:      "email with @ at end",
+			input:     []string{"user@"},
+			expectErr: true,
+		},
+		{
+			name:     "very long email",
+			input:    []string{"verylongemailaddresswithnumbers12345@verylongdomainnamewithsubdomain.example.com"},
+			expected: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseAttendees(tt.input)
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("expected error for input %v, got nil", tt.input)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(result) != tt.expected {
+					t.Errorf("expected %d attendees, got %d", tt.expected, len(result))
+				}
+			}
+		})
+	}
+}
+
+func TestParseDateTime_TimezoneHandling(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "UTC timezone",
+			input: "2024-01-15T14:00:00Z",
+		},
+		{
+			name:  "positive offset",
+			input: "2024-01-15T14:00:00+05:30",
+		},
+		{
+			name:  "negative offset",
+			input: "2024-01-15T14:00:00-08:00",
+		},
+		{
+			name:  "UTC with milliseconds",
+			input: "2024-01-15T14:00:00.000Z",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseDateTime(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tt.input, err)
+			}
+			// Just verify it parsed successfully
+			if result.IsZero() {
+				t.Error("expected non-zero time")
+			}
+		})
+	}
+}
+
+func TestParseDateTime_LeapYearAndEdgeDates(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "leap year Feb 29",
+			input: "2024-02-29",
+		},
+		{
+			name:  "new year",
+			input: "2024-01-01",
+		},
+		{
+			name:  "end of year",
+			input: "2024-12-31",
+		},
+		{
+			name:  "end of month",
+			input: "2024-01-31",
+		},
+		{
+			name:  "Feb 28 non-leap year",
+			input: "2023-02-28",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseDateTime(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tt.input, err)
+			}
+			if result.IsZero() {
+				t.Error("expected non-zero time")
+			}
+		})
+	}
+}
+
+func TestParseDateTime_WithSecondsAndSubseconds(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected time.Time
+	}{
+		{
+			name:     "with seconds",
+			input:    "2024-01-15 14:30:45",
+			expected: time.Date(2024, 1, 15, 14, 30, 45, 0, time.Local),
+		},
+		{
+			name:     "without seconds",
+			input:    "2024-01-15 14:30",
+			expected: time.Date(2024, 1, 15, 14, 30, 0, 0, time.Local),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseDateTime(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !result.Equal(tt.expected) {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestParseRelativeDate_WithMultipleWords(t *testing.T) {
+	// Test that only first two words are processed (relative date + time)
+	// Additional words should cause error
+	tests := []struct {
+		name      string
+		input     string
+		offset    int
+		expectErr bool
+	}{
+		{
+			name:      "tomorrow at 3pm (three words)",
+			input:     "tomorrow at 3pm",
+			offset:    1,
+			expectErr: true, // "at" would be treated as time component and fail
+		},
+		{
+			name:      "today in morning",
+			input:     "today in morning",
+			offset:    0,
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseRelativeDate(tt.input, tt.offset)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error for multi-word input")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestIsValidEmail_ComprehensiveCoverage(t *testing.T) {
+	// Additional email validation edge cases
+	tests := []struct {
+		email string
+		valid bool
+	}{
+		// Valid complex cases
+		{"user+tag@sub.domain.example.com", true},
+		{"first.last123@example-domain.co.uk", true},
+		{"123@456.com", true},
+		{"a@b.co", true},
+
+		// The regex is simple and allows some edge cases - which is OK for basic validation
+		{"user@domain..com", true}, // Double dots allowed by simple regex
+		{".user@domain.com", true}, // Leading dot allowed
+		{"user.@domain.com", true}, // Trailing dot allowed
+
+		// Invalid cases
+		{"user@domain", false},      // No TLD
+		{"@domain.com", false},      // No local part
+		{"user@", false},            // No domain
+		{"user", false},             // No @ or domain
+		{"user@@domain.com", false}, // Double @
+		{"user @domain.com", false}, // Space in local
+		{"user@domain .com", false}, // Space in domain
+		{"user@domain.c", false},    // TLD too short
+		{"", false},                 // Empty
+		{"   ", false},              // Whitespace only
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.email, func(t *testing.T) {
+			result := isValidEmail(tt.email)
+			if result != tt.valid {
+				t.Errorf("isValidEmail(%q) = %v, want %v", tt.email, result, tt.valid)
+			}
+		})
+	}
+}
