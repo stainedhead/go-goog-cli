@@ -151,6 +151,7 @@ func init() {
 }
 
 // getLabelRepository creates a label repository for the current account.
+// Deprecated: Use getLabelRepositoryFromDeps for testability.
 func getLabelRepository(ctx context.Context) (*repository.GmailLabelRepository, error) {
 	tokenSource, err := getTokenSource(ctx)
 	if err != nil {
@@ -170,7 +171,7 @@ func getLabelRepository(ctx context.Context) (*repository.GmailLabelRepository, 
 func runLabelList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	repo, err := getLabelRepository(ctx)
+	repo, err := getLabelRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -194,7 +195,7 @@ func runLabelShow(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	labelName := args[0]
 
-	repo, err := getLabelRepository(ctx)
+	repo, err := getLabelRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -223,7 +224,7 @@ func runLabelCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	labelName := args[0]
 
-	repo, err := getLabelRepository(ctx)
+	repo, err := getLabelRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -272,7 +273,7 @@ func runLabelUpdate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	labelName := args[0]
 
-	repo, err := getLabelRepository(ctx)
+	repo, err := getLabelRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -338,7 +339,7 @@ func runLabelDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	labelName := args[0]
 
-	repo, err := getLabelRepository(ctx)
+	repo, err := getLabelRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}

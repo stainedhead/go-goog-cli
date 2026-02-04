@@ -168,6 +168,7 @@ func init() {
 }
 
 // getDraftRepository creates a draft repository for the current account.
+// Deprecated: Use getDraftRepositoryFromDeps for testability.
 func getDraftRepository(ctx context.Context) (*repository.GmailDraftRepository, error) {
 	tokenSource, err := getTokenSource(ctx)
 	if err != nil {
@@ -187,7 +188,7 @@ func getDraftRepository(ctx context.Context) (*repository.GmailDraftRepository, 
 func runDraftList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	repo, err := getDraftRepository(ctx)
+	repo, err := getDraftRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -219,7 +220,7 @@ func runDraftShow(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	draftID := args[0]
 
-	repo, err := getDraftRepository(ctx)
+	repo, err := getDraftRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -248,7 +249,7 @@ func runDraftShow(cmd *cobra.Command, args []string) error {
 func runDraftCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	repo, err := getDraftRepository(ctx)
+	repo, err := getDraftRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -291,7 +292,7 @@ func runDraftUpdate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	draftID := args[0]
 
-	repo, err := getDraftRepository(ctx)
+	repo, err := getDraftRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -340,7 +341,7 @@ func runDraftSend(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	draftID := args[0]
 
-	repo, err := getDraftRepository(ctx)
+	repo, err := getDraftRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -372,7 +373,7 @@ func runDraftDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	draftID := args[0]
 
-	repo, err := getDraftRepository(ctx)
+	repo, err := getDraftRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}

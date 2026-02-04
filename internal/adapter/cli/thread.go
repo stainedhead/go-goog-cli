@@ -132,6 +132,7 @@ func init() {
 }
 
 // getThreadRepository creates a thread repository for the current account.
+// Deprecated: Use getThreadRepositoryFromDeps for testability.
 func getThreadRepository(ctx context.Context) (*repository.GmailThreadRepository, error) {
 	tokenSource, err := getTokenSource(ctx)
 	if err != nil {
@@ -151,7 +152,7 @@ func getThreadRepository(ctx context.Context) (*repository.GmailThreadRepository
 func runThreadList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	repo, err := getThreadRepository(ctx)
+	repo, err := getThreadRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -184,7 +185,7 @@ func runThreadShow(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	threadID := args[0]
 
-	repo, err := getThreadRepository(ctx)
+	repo, err := getThreadRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -221,7 +222,7 @@ func runThreadTrash(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	threadID := args[0]
 
-	repo, err := getThreadRepository(ctx)
+	repo, err := getThreadRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -242,7 +243,7 @@ func runThreadModify(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	threadID := args[0]
 
-	repo, err := getThreadRepository(ctx)
+	repo, err := getThreadRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}

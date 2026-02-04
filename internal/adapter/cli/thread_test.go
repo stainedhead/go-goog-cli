@@ -3,9 +3,13 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 func TestThreadCmd_Help(t *testing.T) {
@@ -427,5 +431,550 @@ func TestThreadListCmd_DefaultMaxResults(t *testing.T) {
 	// Check default value
 	if flag.DefValue != "20" {
 		t.Errorf("expected default max-results to be '20', got '%s'", flag.DefValue)
+	}
+}
+
+func TestThreadModifyCmd_Validation(t *testing.T) {
+	tests := []struct {
+		name         string
+		addLabels    []string
+		removeLabels []string
+		expectErr    bool
+	}{
+		{
+			name:         "no labels",
+			addLabels:    nil,
+			removeLabels: nil,
+			expectErr:    true,
+		},
+		{
+			name:         "only add labels",
+			addLabels:    []string{"IMPORTANT"},
+			removeLabels: nil,
+			expectErr:    false,
+		},
+		{
+			name:         "only remove labels",
+			addLabels:    nil,
+			removeLabels: []string{"INBOX"},
+			expectErr:    false,
+		},
+		{
+			name:         "both add and remove",
+			addLabels:    []string{"IMPORTANT"},
+			removeLabels: []string{"INBOX"},
+			expectErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origAdd := threadAddLabels
+			origRemove := threadRemoveLabels
+			threadAddLabels = tt.addLabels
+			threadRemoveLabels = tt.removeLabels
+
+			mockCmd := &cobra.Command{Use: "test"}
+
+			err := threadModifyCmd.PreRunE(mockCmd, []string{"thread123"})
+
+			threadAddLabels = origAdd
+			threadRemoveLabels = origRemove
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Tests using dependency injection with mocks
+// =============================================================================
+
+func TestRunThreadList_WithMockDependencies(t *testing.T) {
+	mockThreads := []*mail.Thread{
+		{ID: "thread1", Snippet: "Test thread snippet 1"},
+		{ID: "thread2", Snippet: "Test thread snippet 2"},
+	}
+
+	mockRepo := &MockThreadRepository{
+		Threads: mockThreads,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origMaxResults := threadMaxResults
+	formatFlag = "plain"
+	threadMaxResults = 20
+	defer func() {
+		formatFlag = origFormat
+		threadMaxResults = origMaxResults
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadList(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runThreadList failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "thread1") || !contains(output, "thread2") {
+		t.Errorf("expected output to contain thread IDs, got: %s", output)
+	}
+}
+
+func TestRunThreadList_Error(t *testing.T) {
+	mockRepo := &MockThreadRepository{
+		ListErr: fmt.Errorf("API error"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadList(cmd, []string{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to list threads") {
+		t.Errorf("expected error to contain 'failed to list threads', got: %v", err)
+	}
+}
+
+func TestRunThreadShow_WithMockDependencies(t *testing.T) {
+	mockThread := &mail.Thread{
+		ID:      "thread123",
+		Snippet: "Test thread snippet",
+		Messages: []*mail.Message{
+			{
+				ID:      "msg1",
+				Subject: "Test Subject",
+				From:    "sender@example.com",
+				Body:    "Message body",
+				Date:    time.Now(),
+			},
+		},
+	}
+
+	mockRepo := &MockThreadRepository{
+		Thread: mockThread,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origQuiet := quietFlag
+	formatFlag = "plain"
+	quietFlag = false
+	defer func() {
+		formatFlag = origFormat
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadShow(cmd, []string{"thread123"})
+	if err != nil {
+		t.Fatalf("runThreadShow failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Test Subject") {
+		t.Errorf("expected output to contain subject, got: %s", output)
+	}
+}
+
+func TestRunThreadShow_Error(t *testing.T) {
+	mockRepo := &MockThreadRepository{
+		GetErr: fmt.Errorf("thread not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadShow(cmd, []string{"nonexistent"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to get thread") {
+		t.Errorf("expected error to contain 'failed to get thread', got: %v", err)
+	}
+}
+
+func TestRunThreadTrash_WithMockDependencies(t *testing.T) {
+	mockRepo := &MockThreadRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = false
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadTrash(cmd, []string{"thread123"})
+	if err != nil {
+		t.Fatalf("runThreadTrash failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "thread123") || !contains(output, "trash") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunThreadTrash_Error(t *testing.T) {
+	mockRepo := &MockThreadRepository{
+		TrashErr: fmt.Errorf("trash operation failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadTrash(cmd, []string{"thread123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to trash thread") {
+		t.Errorf("expected error to contain 'failed to trash thread', got: %v", err)
+	}
+}
+
+func TestRunThreadTrash_QuietMode(t *testing.T) {
+	mockRepo := &MockThreadRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = true
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadTrash(cmd, []string{"thread123"})
+	if err != nil {
+		t.Fatalf("runThreadTrash failed: %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Errorf("quiet mode should not produce output, got: %s", output)
+	}
+}
+
+func TestRunThreadModify_WithMockDependencies(t *testing.T) {
+	mockThread := &mail.Thread{
+		ID:      "thread123",
+		Snippet: "Test thread",
+	}
+
+	mockRepo := &MockThreadRepository{
+		Thread: mockThread,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origAdd := threadAddLabels
+	origRemove := threadRemoveLabels
+	formatFlag = "plain"
+	threadAddLabels = []string{"IMPORTANT"}
+	threadRemoveLabels = []string{"INBOX"}
+	defer func() {
+		formatFlag = origFormat
+		threadAddLabels = origAdd
+		threadRemoveLabels = origRemove
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadModify(cmd, []string{"thread123"})
+	if err != nil {
+		t.Fatalf("runThreadModify failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "thread123") || !contains(output, "modified") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunThreadModify_Error(t *testing.T) {
+	mockRepo := &MockThreadRepository{
+		ModifyErr: fmt.Errorf("modify operation failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origAdd := threadAddLabels
+	threadAddLabels = []string{"IMPORTANT"}
+	defer func() { threadAddLabels = origAdd }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadModify(cmd, []string{"thread123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to modify thread") {
+		t.Errorf("expected error to contain 'failed to modify thread', got: %v", err)
+	}
+}
+
+func TestRunThreadModify_JSONFormat(t *testing.T) {
+	mockThread := &mail.Thread{
+		ID:      "thread123",
+		Snippet: "Test thread",
+	}
+
+	mockRepo := &MockThreadRepository{
+		Thread: mockThread,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origAdd := threadAddLabels
+	formatFlag = "json"
+	threadAddLabels = []string{"IMPORTANT"}
+	defer func() {
+		formatFlag = origFormat
+		threadAddLabels = origAdd
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadModify(cmd, []string{"thread123"})
+	if err != nil {
+		t.Fatalf("runThreadModify failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "thread123") {
+		t.Errorf("expected JSON output to contain thread ID, got: %s", output)
+	}
+}
+
+func TestRunThreadList_WithLabelsFilter(t *testing.T) {
+	mockThreads := []*mail.Thread{
+		{ID: "thread1", Snippet: "Filtered thread"},
+	}
+
+	mockRepo := &MockThreadRepository{
+		Threads: mockThreads,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origLabels := threadLabels
+	formatFlag = "plain"
+	threadLabels = []string{"INBOX", "UNREAD"}
+	defer func() {
+		formatFlag = origFormat
+		threadLabels = origLabels
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadList(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runThreadList failed: %v", err)
+	}
+}
+
+func TestRunThreadShow_JSONFormat(t *testing.T) {
+	mockThread := &mail.Thread{
+		ID:      "thread123",
+		Snippet: "JSON thread",
+	}
+
+	mockRepo := &MockThreadRepository{
+		Thread: mockThread,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ThreadRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "json"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runThreadShow(cmd, []string{"thread123"})
+	if err != nil {
+		t.Fatalf("runThreadShow failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "thread123") {
+		t.Errorf("expected JSON output to contain thread ID, got: %s", output)
 	}
 }

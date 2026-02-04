@@ -3,9 +3,12 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 func TestDraftCmd_Help(t *testing.T) {
@@ -554,5 +557,618 @@ func TestDraftListCmd_DefaultLimit(t *testing.T) {
 
 	if flag.DefValue != "20" {
 		t.Errorf("expected default limit to be '20', got '%s'", flag.DefValue)
+	}
+}
+
+// =============================================================================
+// Tests using dependency injection with mocks
+// =============================================================================
+
+func TestRunDraftList_WithMockDependencies(t *testing.T) {
+	mockDrafts := []*mail.Draft{
+		{ID: "draft1", Message: &mail.Message{Subject: "Test Draft 1", To: []string{"user@example.com"}}},
+		{ID: "draft2", Message: &mail.Message{Subject: "Test Draft 2", To: []string{"user2@example.com"}}},
+	}
+
+	mockRepo := &MockDraftRepository{
+		Drafts: mockDrafts,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origLimit := draftLimit
+	formatFlag = "plain"
+	draftLimit = 10
+	defer func() {
+		formatFlag = origFormat
+		draftLimit = origLimit
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftList(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runDraftList failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "draft1") || !contains(output, "draft2") {
+		t.Errorf("expected output to contain draft IDs, got: %s", output)
+	}
+}
+
+func TestRunDraftList_Error(t *testing.T) {
+	mockRepo := &MockDraftRepository{
+		ListErr: fmt.Errorf("API error"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftList(cmd, []string{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to list drafts") {
+		t.Errorf("expected error to contain 'failed to list drafts', got: %v", err)
+	}
+}
+
+func TestRunDraftShow_WithMockDependencies(t *testing.T) {
+	mockDraft := &mail.Draft{
+		ID: "draft123",
+		Message: &mail.Message{
+			Subject: "Test Draft Subject",
+			To:      []string{"recipient@example.com"},
+			Body:    "This is the draft body.",
+		},
+	}
+
+	mockRepo := &MockDraftRepository{
+		Draft: mockDraft,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origQuiet := quietFlag
+	formatFlag = "plain"
+	quietFlag = false
+	defer func() {
+		formatFlag = origFormat
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftShow(cmd, []string{"draft123"})
+	if err != nil {
+		t.Fatalf("runDraftShow failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Test Draft Subject") {
+		t.Errorf("expected output to contain subject, got: %s", output)
+	}
+}
+
+func TestRunDraftShow_Error(t *testing.T) {
+	mockRepo := &MockDraftRepository{
+		GetErr: fmt.Errorf("draft not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftShow(cmd, []string{"nonexistent"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to get draft") {
+		t.Errorf("expected error to contain 'failed to get draft', got: %v", err)
+	}
+}
+
+func TestRunDraftCreate_WithMockDependencies(t *testing.T) {
+	mockRepo := &MockDraftRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origTo := draftTo
+	origSubject := draftSubject
+	origBody := draftBody
+	formatFlag = "plain"
+	draftTo = []string{"user@example.com"}
+	draftSubject = "Test Subject"
+	draftBody = "Test body"
+	defer func() {
+		formatFlag = origFormat
+		draftTo = origTo
+		draftSubject = origSubject
+		draftBody = origBody
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftCreate(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runDraftCreate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Draft created successfully") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+}
+
+func TestRunDraftCreate_Error(t *testing.T) {
+	mockRepo := &MockDraftRepository{
+		CreateErr: fmt.Errorf("create failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	draftTo = []string{"user@example.com"}
+	draftSubject = "Test"
+	defer func() {
+		draftTo = nil
+		draftSubject = ""
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftCreate(cmd, []string{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to create draft") {
+		t.Errorf("expected error to contain 'failed to create draft', got: %v", err)
+	}
+}
+
+func TestRunDraftUpdate_WithMockDependencies(t *testing.T) {
+	mockDraft := &mail.Draft{
+		ID: "draft123",
+		Message: &mail.Message{
+			Subject: "Original Subject",
+			To:      []string{"original@example.com"},
+		},
+	}
+
+	mockRepo := &MockDraftRepository{
+		Draft: mockDraft,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origSubject := draftSubject
+	formatFlag = "plain"
+	draftSubject = "Updated Subject"
+	defer func() {
+		formatFlag = origFormat
+		draftSubject = origSubject
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftUpdate(cmd, []string{"draft123"})
+	if err != nil {
+		t.Fatalf("runDraftUpdate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Draft updated successfully") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+}
+
+func TestRunDraftUpdate_Error(t *testing.T) {
+	mockRepo := &MockDraftRepository{
+		GetErr: fmt.Errorf("draft not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftUpdate(cmd, []string{"nonexistent"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestRunDraftSend_WithMockDependencies(t *testing.T) {
+	mockRepo := &MockDraftRepository{
+		SendResult: &mail.Message{
+			ID:      "sent-msg-id",
+			Subject: "Sent Subject",
+			To:      []string{"recipient@example.com"},
+		},
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "plain"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftSend(cmd, []string{"draft123"})
+	if err != nil {
+		t.Fatalf("runDraftSend failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Draft sent successfully") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+}
+
+func TestRunDraftSend_Error(t *testing.T) {
+	mockRepo := &MockDraftRepository{
+		SendErr: fmt.Errorf("send failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftSend(cmd, []string{"draft123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to send draft") {
+		t.Errorf("expected error to contain 'failed to send draft', got: %v", err)
+	}
+}
+
+func TestRunDraftDelete_WithMockDependencies(t *testing.T) {
+	mockRepo := &MockDraftRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = false
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftDelete(cmd, []string{"draft123"})
+	if err != nil {
+		t.Fatalf("runDraftDelete failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "draft123") || !contains(output, "deleted") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunDraftDelete_Error(t *testing.T) {
+	mockRepo := &MockDraftRepository{
+		DeleteErr: fmt.Errorf("delete failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftDelete(cmd, []string{"draft123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to delete draft") {
+		t.Errorf("expected error to contain 'failed to delete draft', got: %v", err)
+	}
+}
+
+func TestRunDraftDelete_QuietMode(t *testing.T) {
+	mockRepo := &MockDraftRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = true
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftDelete(cmd, []string{"draft123"})
+	if err != nil {
+		t.Fatalf("runDraftDelete failed: %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Errorf("quiet mode should not produce output, got: %s", output)
+	}
+}
+
+func TestRunDraftList_JSONFormat(t *testing.T) {
+	mockDrafts := []*mail.Draft{
+		{ID: "draft1", Message: &mail.Message{Subject: "JSON Draft"}},
+	}
+
+	mockRepo := &MockDraftRepository{
+		Drafts: mockDrafts,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "json"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftList(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runDraftList failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "draft1") {
+		t.Errorf("expected JSON output to contain draft ID, got: %s", output)
+	}
+}
+
+func TestRunDraftCreate_JSONFormat(t *testing.T) {
+	mockRepo := &MockDraftRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origTo := draftTo
+	origSubject := draftSubject
+	formatFlag = "json"
+	draftTo = []string{"user@example.com"}
+	draftSubject = "Test Subject"
+	defer func() {
+		formatFlag = origFormat
+		draftTo = origTo
+		draftSubject = origSubject
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftCreate(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runDraftCreate failed: %v", err)
+	}
+}
+
+func TestRunDraftSend_JSONFormat(t *testing.T) {
+	mockRepo := &MockDraftRepository{
+		SendResult: &mail.Message{
+			ID:      "sent-msg-id",
+			Subject: "Sent Subject",
+		},
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			DraftRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "json"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runDraftSend(cmd, []string{"draft123"})
+	if err != nil {
+		t.Fatalf("runDraftSend failed: %v", err)
 	}
 }
