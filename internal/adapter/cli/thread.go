@@ -10,9 +10,6 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/adapter/presenter"
 	"github.com/stainedhead/go-goog-cli/internal/adapter/repository"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/keyring"
-	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 // Thread command flags.
@@ -106,6 +103,12 @@ using the --add-labels and --remove-labels flags.`,
   # Add and remove labels simultaneously
   goog thread modify abc123 --add-labels "Archive" --remove-labels "INBOX"`,
 	Args: cobra.ExactArgs(1),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if len(threadAddLabels) == 0 && len(threadRemoveLabels) == 0 {
+			return fmt.Errorf("at least one of --add-labels or --remove-labels is required")
+		}
+		return nil
+	},
 	RunE: runThreadModify,
 }
 
@@ -130,32 +133,9 @@ func init() {
 
 // getThreadRepository creates a thread repository for the current account.
 func getThreadRepository(ctx context.Context) (*repository.GmailThreadRepository, error) {
-	// Load config
-	cfg, err := config.Load()
+	tokenSource, err := getTokenSource(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, nil)
-
-	// Resolve account
-	acc, err := svc.ResolveAccount(accountFlag)
-	if err != nil {
-		return nil, fmt.Errorf("no account found: %w", err)
-	}
-
-	// Get token source
-	tokenMgr := svc.GetTokenManager()
-	tokenSource, err := tokenMgr.GetTokenSource(ctx, acc.Alias)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token: %w", err)
+		return nil, err
 	}
 
 	// Create Gmail repository
@@ -261,11 +241,6 @@ func runThreadTrash(cmd *cobra.Command, args []string) error {
 func runThreadModify(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	threadID := args[0]
-
-	// Validate that at least one label operation is specified
-	if len(threadAddLabels) == 0 && len(threadRemoveLabels) == 0 {
-		return fmt.Errorf("at least one of --add-labels or --remove-labels is required")
-	}
 
 	repo, err := getThreadRepository(ctx)
 	if err != nil {

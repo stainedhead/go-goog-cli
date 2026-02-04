@@ -254,3 +254,203 @@ func TestLabelDeleteCmd_HasConfirmFlag(t *testing.T) {
 		t.Error("expected --confirm flag to be set")
 	}
 }
+
+func TestLabelShowCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"MyLabel"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"MyLabel", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := labelShowCmd.Args(labelShowCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestLabelCreateCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"NewLabel"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"NewLabel", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := labelCreateCmd.Args(labelCreateCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestLabelUpdateCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"MyLabel"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"MyLabel", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := labelUpdateCmd.Args(labelUpdateCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestLabelDeleteCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"MyLabel"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"MyLabel", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := labelDeleteCmd.Args(labelDeleteCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestLabelCmd_SubcommandsRegistered(t *testing.T) {
+	subcommands := map[string]bool{
+		"list":   false,
+		"show":   false,
+		"create": false,
+		"update": false,
+		"delete": false,
+	}
+
+	for _, sub := range labelCmd.Commands() {
+		if _, ok := subcommands[sub.Name()]; ok {
+			subcommands[sub.Name()] = true
+		}
+	}
+
+	for name, found := range subcommands {
+		if !found {
+			t.Errorf("expected subcommand %s to be registered with labelCmd", name)
+		}
+	}
+}
+
+func TestLabelCreateCmd_HasFlags(t *testing.T) {
+	flags := []string{"background", "text"}
+
+	for _, flagName := range flags {
+		flag := labelCreateCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on create command", flagName)
+		}
+	}
+}
+
+func TestLabelUpdateCmd_HasFlags(t *testing.T) {
+	flags := []string{"background", "text"}
+
+	for _, flagName := range flags {
+		flag := labelUpdateCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on update command", flagName)
+		}
+	}
+}

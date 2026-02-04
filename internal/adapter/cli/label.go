@@ -9,9 +9,6 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/adapter/presenter"
 	"github.com/stainedhead/go-goog-cli/internal/adapter/repository"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/keyring"
-	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 // Label command flags.
@@ -121,6 +118,12 @@ Requires --confirm flag for safety.`,
 	Example: `  # Delete a label (requires confirmation)
   goog label delete "Old Projects" --confirm`,
 	Args: cobra.ExactArgs(1),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if !labelConfirm {
+			return fmt.Errorf("deletion requires --confirm flag")
+		}
+		return nil
+	},
 	RunE: runLabelDelete,
 }
 
@@ -149,32 +152,9 @@ func init() {
 
 // getLabelRepository creates a label repository for the current account.
 func getLabelRepository(ctx context.Context) (*repository.GmailLabelRepository, error) {
-	// Load config
-	cfg, err := config.Load()
+	tokenSource, err := getTokenSource(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, nil)
-
-	// Resolve account
-	acc, err := svc.ResolveAccount(accountFlag)
-	if err != nil {
-		return nil, fmt.Errorf("no account found: %w", err)
-	}
-
-	// Get token source
-	tokenMgr := svc.GetTokenManager()
-	tokenSource, err := tokenMgr.GetTokenSource(ctx, acc.Alias)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token: %w", err)
+		return nil, err
 	}
 
 	// Create Gmail repository
@@ -357,11 +337,6 @@ func runLabelUpdate(cmd *cobra.Command, args []string) error {
 func runLabelDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	labelName := args[0]
-
-	// Require confirmation
-	if !labelConfirm {
-		return fmt.Errorf("deletion requires --confirm flag")
-	}
 
 	repo, err := getLabelRepository(ctx)
 	if err != nil {

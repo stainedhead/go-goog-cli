@@ -189,6 +189,11 @@ func runCalCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("start time must be before end time")
 	}
 
+	// Validate start time and duration
+	if err := validateEventTime(startTime, endTime, calCreateAllDay); err != nil {
+		return err
+	}
+
 	// Get repository
 	repo, err := getGCalEventRepository(ctx)
 	if err != nil {
@@ -216,7 +221,10 @@ func runCalCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Add attendees
-	attendees := parseAttendees(calCreateAttendees)
+	attendees, err := parseAttendees(calCreateAttendees)
+	if err != nil {
+		return err
+	}
 	for _, email := range attendees {
 		event.AddAttendee(calendar.NewAttendee(email))
 	}
@@ -296,7 +304,10 @@ func runCalUpdate(cmd *cobra.Command, args []string) error {
 
 	// Update attendees if provided
 	if len(calUpdateAttendees) > 0 {
-		attendees := parseAttendees(calUpdateAttendees)
+		attendees, err := parseAttendees(calUpdateAttendees)
+		if err != nil {
+			return err
+		}
 		existing.Attendees = make([]*calendar.Attendee, 0, len(attendees))
 		for _, email := range attendees {
 			existing.AddAttendee(calendar.NewAttendee(email))
@@ -458,18 +469,22 @@ func parseTimeOfDay(input string) (hour, minute int, err error) {
 	return 0, 0, fmt.Errorf("invalid time format: %s", input)
 }
 
-// parseAttendees cleans and returns attendee email addresses.
-func parseAttendees(attendees []string) []string {
+// parseAttendees cleans, validates, and returns attendee email addresses.
+// Returns an error if any email address is invalid.
+func parseAttendees(attendees []string) ([]string, error) {
 	if attendees == nil {
-		return []string{}
+		return []string{}, nil
 	}
 
 	result := make([]string, 0, len(attendees))
 	for _, a := range attendees {
 		trimmed := strings.TrimSpace(a)
 		if trimmed != "" {
+			if !isValidEmail(trimmed) {
+				return nil, fmt.Errorf("invalid attendee email: %q", trimmed)
+			}
 			result = append(result, trimmed)
 		}
 	}
-	return result
+	return result, nil
 }

@@ -10,9 +10,6 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/adapter/presenter"
 	"github.com/stainedhead/go-goog-cli/internal/adapter/repository"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/keyring"
-	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 // Draft command flags.
@@ -84,6 +81,15 @@ edit it or send it using the send command.`,
 
   # Create a draft with multiple recipients
   goog draft create --to user1@example.com --to user2@example.com --subject "Group message"`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if len(draftTo) == 0 {
+			return fmt.Errorf("at least one recipient is required (--to)")
+		}
+		if draftSubject == "" {
+			return fmt.Errorf("subject is required (--subject)")
+		}
+		return nil
+	},
 	RunE: runDraftCreate,
 }
 
@@ -163,32 +169,9 @@ func init() {
 
 // getDraftRepository creates a draft repository for the current account.
 func getDraftRepository(ctx context.Context) (*repository.GmailDraftRepository, error) {
-	// Load config
-	cfg, err := config.Load()
+	tokenSource, err := getTokenSource(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, nil)
-
-	// Resolve account
-	acc, err := svc.ResolveAccount(accountFlag)
-	if err != nil {
-		return nil, fmt.Errorf("no account found: %w", err)
-	}
-
-	// Get token source
-	tokenMgr := svc.GetTokenManager()
-	tokenSource, err := tokenMgr.GetTokenSource(ctx, acc.Alias)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token: %w", err)
+		return nil, err
 	}
 
 	// Create Gmail repository
@@ -264,14 +247,6 @@ func runDraftShow(cmd *cobra.Command, args []string) error {
 // runDraftCreate handles the draft create command.
 func runDraftCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-
-	// Validate required fields
-	if len(draftTo) == 0 {
-		return fmt.Errorf("at least one recipient is required (--to)")
-	}
-	if draftSubject == "" {
-		return fmt.Errorf("subject is required (--subject)")
-	}
 
 	repo, err := getDraftRepository(ctx)
 	if err != nil {

@@ -150,12 +150,28 @@ func runMailSend(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Parse and validate recipients
+	toRecipients, err := parseEmailRecipients(mailSendTo)
+	if err != nil {
+		return fmt.Errorf("invalid 'to' recipient: %w", err)
+	}
+
+	ccRecipients, err := parseEmailRecipients(mailSendCc)
+	if err != nil {
+		return fmt.Errorf("invalid 'cc' recipient: %w", err)
+	}
+
+	bccRecipients, err := parseEmailRecipients(mailSendBcc)
+	if err != nil {
+		return fmt.Errorf("invalid 'bcc' recipient: %w", err)
+	}
+
 	// Build message
 	msg := &mail.Message{
 		From:    senderEmail,
-		To:      parseEmailRecipients(mailSendTo),
-		Cc:      parseEmailRecipients(mailSendCc),
-		Bcc:     parseEmailRecipients(mailSendBcc),
+		To:      toRecipients,
+		Cc:      ccRecipients,
+		Bcc:     bccRecipients,
 		Subject: mailSendSubject,
 	}
 
@@ -241,10 +257,16 @@ func runMailForward(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Parse and validate recipients
+	toRecipients, err := parseEmailRecipients(mailForwardTo)
+	if err != nil {
+		return fmt.Errorf("invalid 'to' recipient: %w", err)
+	}
+
 	// Build forward message
 	forward := &mail.Message{
 		From: senderEmail,
-		To:   parseEmailRecipients(mailForwardTo),
+		To:   toRecipients,
 		Body: mailForwardBody,
 	}
 
@@ -261,20 +283,24 @@ func runMailForward(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// parseEmailRecipients cleans and returns email recipients.
-func parseEmailRecipients(recipients []string) []string {
+// parseEmailRecipients cleans, validates, and returns email recipients.
+// Returns an error if any email address is invalid.
+func parseEmailRecipients(recipients []string) ([]string, error) {
 	if recipients == nil {
-		return []string{}
+		return []string{}, nil
 	}
 
 	result := make([]string, 0, len(recipients))
 	for _, r := range recipients {
 		trimmed := strings.TrimSpace(r)
 		if trimmed != "" {
+			if !isValidEmail(trimmed) {
+				return nil, fmt.Errorf("invalid email address: %q", trimmed)
+			}
 			result = append(result, trimmed)
 		}
 	}
-	return result
+	return result, nil
 }
 
 // buildReplySubject prepends "Re: " to the subject if not already present.

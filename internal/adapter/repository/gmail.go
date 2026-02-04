@@ -17,12 +17,7 @@ import (
 	"google.golang.org/api/option"
 )
 
-// Repository errors for Gmail operations.
-var (
-	ErrBadRequest  = errors.New("bad request")
-	ErrRateLimited = errors.New("rate limited")
-	ErrTemporary   = errors.New("temporary error")
-)
+// Repository errors are defined in errors.go to share across implementations.
 
 // Default configuration for Gmail repository.
 const (
@@ -1088,7 +1083,8 @@ func gmailThreadToDomain(thread *gmail.Thread) *mail.Thread {
 		}
 
 		// Extract labels from the first message (threads share labels)
-		if len(thread.Messages[0].LabelIds) > 0 {
+		// Check both thread.Messages length and first message's LabelIds to avoid nil pointer
+		if len(thread.Messages) > 0 && len(thread.Messages[0].LabelIds) > 0 {
 			result.Labels = thread.Messages[0].LabelIds
 		}
 	}

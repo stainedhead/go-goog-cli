@@ -402,3 +402,228 @@ func TestCalCmd_HasUnshareSubcommand(t *testing.T) {
 		t.Error("expected cal command to have unshare subcommand")
 	}
 }
+
+func TestACLListCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"primary"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"primary", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := aclListCmd.Args(aclListCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestACLAddCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"primary"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"primary", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := aclAddCmd.Args(aclAddCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestACLRemoveCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"primary"},
+			expectErr: true, // needs 2 args
+		},
+		{
+			name:      "two args",
+			args:      []string{"primary", "ruleId"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"primary", "ruleId", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := aclRemoveCmd.Args(aclRemoveCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestShareCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"primary"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"primary", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := shareCmd.Args(shareCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestUnshareCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"primary"},
+			expectErr: true, // needs 2 args
+		},
+		{
+			name:      "two args",
+			args:      []string{"primary", "ruleId"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"primary", "ruleId", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := unshareCmd.Args(unshareCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestACLCmd_SubcommandsRegistered(t *testing.T) {
+	subcommands := map[string]bool{
+		"list":   false,
+		"add":    false,
+		"remove": false,
+	}
+
+	for _, sub := range aclCmd.Commands() {
+		if _, ok := subcommands[sub.Name()]; ok {
+			subcommands[sub.Name()] = true
+		}
+	}
+
+	for name, found := range subcommands {
+		if !found {
+			t.Errorf("expected subcommand %s to be registered with aclCmd", name)
+		}
+	}
+}

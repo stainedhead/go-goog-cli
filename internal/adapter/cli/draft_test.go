@@ -266,3 +266,293 @@ func TestDraftCmd_Aliases(t *testing.T) {
 		})
 	}
 }
+
+func TestDraftShowCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"draft123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"draft123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := draftShowCmd.Args(draftShowCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDraftUpdateCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"draft123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"draft123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := draftUpdateCmd.Args(draftUpdateCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDraftSendCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"draft123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"draft123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := draftSendCmd.Args(draftSendCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDraftDeleteCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"draft123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"draft123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := draftDeleteCmd.Args(draftDeleteCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDraftCreateCmd_Validation(t *testing.T) {
+	tests := []struct {
+		name      string
+		to        []string
+		subject   string
+		expectErr bool
+	}{
+		{
+			name:      "empty to list",
+			to:        []string{},
+			subject:   "Test Subject",
+			expectErr: true,
+		},
+		{
+			name:      "nil to list",
+			to:        nil,
+			subject:   "Test Subject",
+			expectErr: true,
+		},
+		{
+			name:      "empty subject",
+			to:        []string{"user@example.com"},
+			subject:   "",
+			expectErr: true,
+		},
+		{
+			name:      "valid input",
+			to:        []string{"user@example.com"},
+			subject:   "Test Subject",
+			expectErr: false,
+		},
+		{
+			name:      "multiple recipients",
+			to:        []string{"user1@example.com", "user2@example.com"},
+			subject:   "Test Subject",
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origTo := draftTo
+			origSubject := draftSubject
+
+			draftTo = tt.to
+			draftSubject = tt.subject
+
+			mockCmd := &cobra.Command{Use: "test"}
+
+			err := draftCreateCmd.PreRunE(mockCmd, []string{})
+
+			draftTo = origTo
+			draftSubject = origSubject
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDraftCmd_SubcommandsRegistered(t *testing.T) {
+	subcommands := map[string]bool{
+		"list":   false,
+		"show":   false,
+		"create": false,
+		"update": false,
+		"send":   false,
+		"delete": false,
+	}
+
+	for _, sub := range draftCmd.Commands() {
+		if _, ok := subcommands[sub.Name()]; ok {
+			subcommands[sub.Name()] = true
+		}
+	}
+
+	for name, found := range subcommands {
+		if !found {
+			t.Errorf("expected subcommand %s to be registered with draftCmd", name)
+		}
+	}
+}
+
+func TestDraftListCmd_HasFlags(t *testing.T) {
+	flags := []string{"limit"}
+
+	for _, flagName := range flags {
+		flag := draftListCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on list command", flagName)
+		}
+	}
+}
+
+func TestDraftCreateCmd_HasFlags(t *testing.T) {
+	flags := []string{"to", "subject", "body"}
+
+	for _, flagName := range flags {
+		flag := draftCreateCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on create command", flagName)
+		}
+	}
+}
+
+func TestDraftUpdateCmd_HasFlags(t *testing.T) {
+	flags := []string{"to", "subject", "body"}
+
+	for _, flagName := range flags {
+		flag := draftUpdateCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on update command", flagName)
+		}
+	}
+}
+
+func TestDraftListCmd_DefaultLimit(t *testing.T) {
+	flag := draftListCmd.Flag("limit")
+	if flag == nil {
+		t.Fatal("expected --limit flag to be set")
+	}
+
+	if flag.DefValue != "20" {
+		t.Errorf("expected default limit to be '20', got '%s'", flag.DefValue)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
 )
 
 // containsStr is a helper function to check if string contains substring.
@@ -481,4 +482,364 @@ func TestRenderFreeBusyJSON_NilResponse(t *testing.T) {
 // dummyTime returns a dummy time for testing.
 func dummyTime() time.Time {
 	return time.Date(2024, 1, 15, 9, 0, 0, 0, time.UTC)
+}
+
+func TestRenderFreeBusyTable_EmptyCalendars(t *testing.T) {
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{},
+	}
+
+	start := time.Date(2024, 1, 15, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2024, 1, 15, 17, 0, 0, 0, time.UTC)
+
+	result := renderFreeBusyTable(response, start, end)
+	if !containsStr(result, "No busy periods found") {
+		t.Error("expected output to mention no busy periods for empty calendars")
+	}
+}
+
+func TestRenderFreeBusyTable_WithBusyPeriods(t *testing.T) {
+	busyStart := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	busyEnd := time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)
+
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{
+			"primary": {
+				{Start: busyStart, End: busyEnd},
+			},
+		},
+	}
+
+	start := time.Date(2024, 1, 15, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2024, 1, 15, 17, 0, 0, 0, time.UTC)
+
+	result := renderFreeBusyTable(response, start, end)
+
+	if !containsStr(result, "primary") {
+		t.Error("expected output to contain calendar ID 'primary'")
+	}
+	if !containsStr(result, "BUSY") {
+		t.Error("expected output to contain 'BUSY'")
+	}
+	if !containsStr(result, "Free/Busy Information") {
+		t.Error("expected output to contain 'Free/Busy Information'")
+	}
+}
+
+func TestRenderFreeBusyTable_NoBusyPeriods(t *testing.T) {
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{
+			"primary": {}, // Empty busy periods (all free)
+		},
+	}
+
+	start := time.Date(2024, 1, 15, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2024, 1, 15, 17, 0, 0, 0, time.UTC)
+
+	result := renderFreeBusyTable(response, start, end)
+
+	if !containsStr(result, "primary") {
+		t.Error("expected output to contain calendar ID 'primary'")
+	}
+	if !containsStr(result, "No busy periods (free)") {
+		t.Error("expected output to mention calendar is free")
+	}
+}
+
+func TestRenderFreeBusyTable_MultipleCalendars(t *testing.T) {
+	busyStart := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	busyEnd := time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)
+
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{
+			"primary": {
+				{Start: busyStart, End: busyEnd},
+			},
+			"work@example.com": {}, // Free
+		},
+	}
+
+	start := time.Date(2024, 1, 15, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2024, 1, 15, 17, 0, 0, 0, time.UTC)
+
+	result := renderFreeBusyTable(response, start, end)
+
+	if !containsStr(result, "primary") {
+		t.Error("expected output to contain 'primary'")
+	}
+	if !containsStr(result, "work@example.com") {
+		t.Error("expected output to contain 'work@example.com'")
+	}
+}
+
+func TestRenderFreeBusyJSON_EmptyCalendars(t *testing.T) {
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{},
+	}
+
+	result := renderFreeBusyJSON(response)
+
+	if !containsStr(result, "calendars") {
+		t.Error("expected output to contain 'calendars' key")
+	}
+}
+
+func TestRenderFreeBusyJSON_WithBusyPeriods(t *testing.T) {
+	busyStart := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	busyEnd := time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)
+
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{
+			"primary": {
+				{Start: busyStart, End: busyEnd},
+			},
+		},
+	}
+
+	result := renderFreeBusyJSON(response)
+
+	if !containsStr(result, "primary") {
+		t.Error("expected output to contain 'primary'")
+	}
+	if !containsStr(result, "start") {
+		t.Error("expected output to contain 'start'")
+	}
+	if !containsStr(result, "end") {
+		t.Error("expected output to contain 'end'")
+	}
+	if !containsStr(result, "2024-01-15T10:00:00Z") {
+		t.Error("expected output to contain start time in RFC3339 format")
+	}
+	if !containsStr(result, "2024-01-15T11:00:00Z") {
+		t.Error("expected output to contain end time in RFC3339 format")
+	}
+}
+
+func TestRenderFreeBusyJSON_MultipleBusyPeriods(t *testing.T) {
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{
+			"primary": {
+				{Start: time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC), End: time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)},
+				{Start: time.Date(2024, 1, 15, 14, 0, 0, 0, time.UTC), End: time.Date(2024, 1, 15, 15, 0, 0, 0, time.UTC)},
+			},
+		},
+	}
+
+	result := renderFreeBusyJSON(response)
+
+	// Should have commas between periods
+	if !containsStr(result, "2024-01-15T10:00:00Z") {
+		t.Error("expected first busy period start time")
+	}
+	if !containsStr(result, "2024-01-15T14:00:00Z") {
+		t.Error("expected second busy period start time")
+	}
+}
+
+func TestRenderFreeBusyJSON_MultipleCalendars(t *testing.T) {
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{
+			"primary": {
+				{Start: time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC), End: time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)},
+			},
+			"work@example.com": {
+				{Start: time.Date(2024, 1, 15, 14, 0, 0, 0, time.UTC), End: time.Date(2024, 1, 15, 15, 0, 0, 0, time.UTC)},
+			},
+		},
+	}
+
+	result := renderFreeBusyJSON(response)
+
+	if !containsStr(result, "primary") {
+		t.Error("expected output to contain 'primary'")
+	}
+	if !containsStr(result, "work@example.com") {
+		t.Error("expected output to contain 'work@example.com'")
+	}
+}
+
+func TestCalQuickAddCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"Meeting tomorrow at 3pm"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"Meeting", "tomorrow"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := calQuickAddCmd.Args(calQuickAddCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalRSVPCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"event123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"event123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := calRSVPCmd.Args(calRSVPCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalMoveCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"event123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"event123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := calMoveCmd.Args(calMoveCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalRSVPCmd_AllThreeFlagsSet(t *testing.T) {
+	calRSVPAccept = true
+	calRSVPDecline = true
+	calRSVPTentative = true
+
+	mockCmd := &cobra.Command{Use: "test"}
+
+	if calRSVPCmd.PreRunE != nil {
+		err := calRSVPCmd.PreRunE(mockCmd, []string{"event123"})
+		if err == nil {
+			t.Error("expected error when all three RSVP flags are set")
+		}
+	}
+}
+
+func TestCalFreeBusyCmd_HasFlags(t *testing.T) {
+	flags := []string{"start", "end", "calendars"}
+
+	for _, flagName := range flags {
+		flag := calFreeBusyCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on freebusy command", flagName)
+		}
+	}
+}
+
+func TestCalRSVPCmd_HasFlags(t *testing.T) {
+	flags := []string{"accept", "decline", "tentative", "calendar"}
+
+	for _, flagName := range flags {
+		flag := calRSVPCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on rsvp command", flagName)
+		}
+	}
+}
+
+func TestCalMoveCmd_HasFlags(t *testing.T) {
+	flags := []string{"to", "calendar"}
+
+	for _, flagName := range flags {
+		flag := calMoveCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on move command", flagName)
+		}
+	}
+}
+
+func TestCalCmd_SubcommandsRegistered(t *testing.T) {
+	subcommands := map[string]bool{
+		"quick":    false,
+		"freebusy": false,
+		"rsvp":     false,
+		"move":     false,
+	}
+
+	for _, sub := range calCmd.Commands() {
+		if _, ok := subcommands[sub.Name()]; ok {
+			subcommands[sub.Name()] = true
+		}
+	}
+
+	for name, found := range subcommands {
+		if !found {
+			t.Errorf("expected subcommand %s to be registered with calCmd", name)
+		}
+	}
 }

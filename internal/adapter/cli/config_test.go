@@ -188,3 +188,119 @@ func TestConfigCmd_Aliases(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigCmd_SubcommandsRegistered(t *testing.T) {
+	subcommands := map[string]bool{
+		"show": false,
+		"set":  false,
+		"get":  false,
+		"path": false,
+	}
+
+	for _, sub := range configCmd.Commands() {
+		if _, ok := subcommands[sub.Name()]; ok {
+			subcommands[sub.Name()] = true
+		}
+	}
+
+	for name, found := range subcommands {
+		if !found {
+			t.Errorf("expected subcommand %s to be registered with configCmd", name)
+		}
+	}
+}
+
+func TestConfigSetCmd_HasArgsRequirement(t *testing.T) {
+	if configSetCmd.Args == nil {
+		t.Error("expected Args to be set on set command")
+	}
+}
+
+func TestConfigGetCmd_HasArgsRequirement(t *testing.T) {
+	if configGetCmd.Args == nil {
+		t.Error("expected Args to be set on get command")
+	}
+}
+
+func TestConfigSetCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"key"},
+			expectErr: true,
+		},
+		{
+			name:      "two args",
+			args:      []string{"key", "value"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"key", "value", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := configSetCmd.Args(configSetCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestConfigGetCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"key"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"key", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := configGetCmd.Args(configGetCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}

@@ -13,11 +13,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/99designs/keyring"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 const (
@@ -26,6 +28,13 @@ const (
 
 	// keyPrefix is the prefix for all keys stored by this application.
 	keyPrefix = "goog"
+
+	// pbkdf2Iterations is the number of iterations for PBKDF2 key derivation.
+	// This provides protection against brute-force attacks.
+	pbkdf2Iterations = 100000
+
+	// saltSize is the size of the random salt in bytes.
+	saltSize = 32
 )
 
 // ErrKeyNotFound is returned when a requested key does not exist in the store.
@@ -103,17 +112,55 @@ func openKeyring(configDir string) (keyring.Keyring, error) {
 	// Always add file backend as final fallback
 	backends = append(backends, keyring.FileBackend)
 
+	// Derive machine-specific password for file backend
+	machinePassword := deriveMachinePassword()
+
 	cfg := keyring.Config{
 		ServiceName:                    ServiceName,
 		AllowedBackends:                backends,
 		FileDir:                        filepath.Join(configDir, "keyring"),
-		FilePasswordFunc:               keyring.FixedStringPrompt("goog-keyring"),
+		FilePasswordFunc:               keyring.FixedStringPrompt(machinePassword),
 		KeychainTrustApplication:       true,
 		KeychainSynchronizable:         false,
 		KeychainAccessibleWhenUnlocked: true,
 	}
 
 	return keyring.Open(cfg)
+}
+
+// deriveMachinePassword creates a machine-specific password by combining
+// hostname and user information. This ensures the password is unique per machine
+// and user, making stolen keyring files harder to decrypt on other machines.
+func deriveMachinePassword() string {
+	var components []string
+
+	// Add hostname
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		components = append(components, hostname)
+	}
+
+	// Add current user info
+	if currentUser, err := user.Current(); err == nil {
+		if currentUser.Username != "" {
+			components = append(components, currentUser.Username)
+		}
+		if currentUser.Uid != "" {
+			components = append(components, currentUser.Uid)
+		}
+		if currentUser.HomeDir != "" {
+			components = append(components, currentUser.HomeDir)
+		}
+	}
+
+	// Add a constant prefix to make the intent clear
+	components = append([]string{"go-goog-cli-keyring"}, components...)
+
+	// Combine all components and hash them
+	combined := strings.Join(components, ":")
+	hash := sha256.Sum256([]byte(combined))
+
+	// Return hex-encoded hash as the password
+	return fmt.Sprintf("%x", hash)
 }
 
 // getConfigDir returns the configuration directory for the application.
@@ -205,6 +252,13 @@ type tokenData struct {
 	Tokens map[string][]byte `json:"tokens"`
 }
 
+// encryptedFile represents the structure of the encrypted file on disk,
+// including the salt used for key derivation.
+type encryptedFile struct {
+	Salt       []byte `json:"salt"`       // Random salt for PBKDF2
+	Ciphertext []byte `json:"ciphertext"` // Encrypted token data
+}
+
 // Set stores a value in an encrypted file.
 func (s *FileStore) Set(account, key string, value []byte) error {
 	data, err := s.loadTokenData(account)
@@ -281,12 +335,46 @@ func (s *FileStore) tokenFilePath(account string) string {
 // loadTokenData loads and decrypts token data from a file.
 func (s *FileStore) loadTokenData(account string) (*tokenData, error) {
 	filePath := s.tokenFilePath(account)
-	encryptedData, err := os.ReadFile(filePath)
+	fileData, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
 
-	plaintext, err := decrypt(encryptedData, s.deriveKey(account))
+	// Parse the encrypted file structure
+	var encFile encryptedFile
+	if err := json.Unmarshal(fileData, &encFile); err != nil {
+		// Try legacy format (raw encrypted data without salt)
+		return s.loadLegacyTokenData(fileData, account)
+	}
+
+	// Validate salt
+	if len(encFile.Salt) != saltSize {
+		return nil, errors.New("invalid salt in encrypted file")
+	}
+
+	// Derive key using PBKDF2 with the stored salt
+	key := s.deriveKey(account, encFile.Salt)
+
+	plaintext, err := decrypt(encFile.Ciphertext, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt token data: %w", err)
+	}
+
+	var data tokenData
+	if err := json.Unmarshal(plaintext, &data); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal token data: %w", err)
+	}
+
+	return &data, nil
+}
+
+// loadLegacyTokenData handles loading token data encrypted with the old format
+// (simple SHA256 key derivation without salt). This provides backward compatibility.
+func (s *FileStore) loadLegacyTokenData(encryptedData []byte, account string) (*tokenData, error) {
+	// Use legacy key derivation
+	key := s.deriveLegacyKey(account)
+
+	plaintext, err := decrypt(encryptedData, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt token data: %w", err)
 	}
@@ -306,24 +394,77 @@ func (s *FileStore) saveTokenData(account string, data *tokenData) error {
 		return fmt.Errorf("failed to marshal token data: %w", err)
 	}
 
-	ciphertext, err := encrypt(plaintext, s.deriveKey(account))
+	// Generate a new random salt for each save
+	salt := make([]byte, saltSize)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return fmt.Errorf("failed to generate salt: %w", err)
+	}
+
+	// Derive key using PBKDF2 with the new salt
+	key := s.deriveKey(account, salt)
+
+	ciphertext, err := encrypt(plaintext, key)
 	if err != nil {
 		return fmt.Errorf("failed to encrypt token data: %w", err)
 	}
 
+	// Create the encrypted file structure
+	encFile := encryptedFile{
+		Salt:       salt,
+		Ciphertext: ciphertext,
+	}
+
+	fileData, err := json.Marshal(encFile)
+	if err != nil {
+		return fmt.Errorf("failed to marshal encrypted file: %w", err)
+	}
+
 	filePath := s.tokenFilePath(account)
-	return os.WriteFile(filePath, ciphertext, 0600)
+	return os.WriteFile(filePath, fileData, 0600)
 }
 
-// deriveKey derives an encryption key from the account name.
-// NOTE: In a production system, this should use a more secure key derivation
-// method, potentially involving user input or secure key storage.
-func (s *FileStore) deriveKey(account string) []byte {
-	// Combine account with a fixed secret (for file-based fallback only)
-	// The system keyring should be preferred for actual secrets
+// deriveKey derives an encryption key using PBKDF2 with machine-specific info.
+// The salt is stored alongside the encrypted data to allow decryption.
+// Uses 100,000 iterations of PBKDF2-HMAC-SHA256 for key stretching.
+func (s *FileStore) deriveKey(account string, salt []byte) []byte {
+	// Combine account with machine-specific information
+	machineInfo := getMachineInfo()
+	input := fmt.Sprintf("go-goog-cli-file-store:%s:%s", account, machineInfo)
+
+	// Use PBKDF2 with SHA256 for key stretching
+	// 32 bytes = 256 bits for AES-256
+	return pbkdf2.Key([]byte(input), salt, pbkdf2Iterations, 32, sha256.New)
+}
+
+// deriveLegacyKey provides backward compatibility with the old key derivation.
+// This uses simple SHA256 hashing without salt or iterations.
+func (s *FileStore) deriveLegacyKey(account string) []byte {
 	input := fmt.Sprintf("go-goog-cli-file-store:%s", account)
 	hash := sha256.Sum256([]byte(input))
 	return hash[:]
+}
+
+// getMachineInfo returns a string combining machine-specific identifiers.
+// This makes encrypted files harder to use if copied to another machine.
+func getMachineInfo() string {
+	var components []string
+
+	// Add hostname
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		components = append(components, hostname)
+	}
+
+	// Add current user info
+	if currentUser, err := user.Current(); err == nil {
+		if currentUser.Username != "" {
+			components = append(components, currentUser.Username)
+		}
+		if currentUser.Uid != "" {
+			components = append(components, currentUser.Uid)
+		}
+	}
+
+	return strings.Join(components, ":")
 }
 
 // encrypt encrypts plaintext using AES-GCM.

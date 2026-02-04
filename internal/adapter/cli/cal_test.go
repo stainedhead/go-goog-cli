@@ -228,10 +228,20 @@ func TestCalWeekCmd_HasCalendarFlag(t *testing.T) {
 func TestCalCmdSubcommands_Registered(t *testing.T) {
 	// Verify subcommands are registered with calCmd
 	subcommands := map[string]bool{
-		"list":  false,
-		"show":  false,
-		"today": false,
-		"week":  false,
+		"list":      false,
+		"show":      false,
+		"today":     false,
+		"week":      false,
+		"create":    false,
+		"update":    false,
+		"delete":    false,
+		"instances": false,
+		"quick":     false,
+		"freebusy":  false,
+		"rsvp":      false,
+		"move":      false,
+		"calendars": false,
+		"acl":       false,
 	}
 
 	for _, sub := range calCmd.Commands() {
@@ -244,5 +254,54 @@ func TestCalCmdSubcommands_Registered(t *testing.T) {
 		if !found {
 			t.Errorf("expected subcommand %s to be registered with calCmd", name)
 		}
+	}
+}
+
+func TestCalListCmd_HasArgsRequirement(t *testing.T) {
+	// calListCmd should not require args (it lists events without args)
+	if calListCmd.Args != nil {
+		err := calListCmd.Args(calListCmd, []string{})
+		if err != nil {
+			t.Errorf("calListCmd should accept no args: %v", err)
+		}
+	}
+}
+
+func TestCalShowCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"event-id"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"event-id", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := calShowCmd.Args(calShowCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
 	}
 }

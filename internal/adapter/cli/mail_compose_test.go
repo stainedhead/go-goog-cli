@@ -222,9 +222,10 @@ func TestMailForwardCmd_RequiresToFlag(t *testing.T) {
 
 func TestParseEmailRecipients(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    []string
-		expected []string
+		name      string
+		input     []string
+		expected  []string
+		expectErr bool
 	}{
 		{
 			name:     "single email",
@@ -251,11 +252,30 @@ func TestParseEmailRecipients(t *testing.T) {
 			input:    nil,
 			expected: []string{},
 		},
+		{
+			name:      "invalid email",
+			input:     []string{"notanemail"},
+			expectErr: true,
+		},
+		{
+			name:      "one valid one invalid",
+			input:     []string{"valid@example.com", "invalid"},
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseEmailRecipients(tt.input)
+			result, err := parseEmailRecipients(tt.input)
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("expected error for input %v, got nil", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if len(result) != len(tt.expected) {
 				t.Errorf("expected %d recipients, got %d", len(tt.expected), len(result))
 				return
@@ -266,5 +286,414 @@ func TestParseEmailRecipients(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseEmailRecipients_AdditionalCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []string
+		expected  []string
+		expectErr bool
+	}{
+		{
+			name:     "filter empty strings",
+			input:    []string{"user@example.com", "", "  "},
+			expected: []string{"user@example.com"},
+		},
+		{
+			name:     "mixed whitespace and valid",
+			input:    []string{"  ", "user1@example.com", "", "   user2@example.com   "},
+			expected: []string{"user1@example.com", "user2@example.com"},
+		},
+		{
+			name:     "all empty strings",
+			input:    []string{"", "", ""},
+			expected: []string{},
+		},
+		{
+			name:     "tabs and spaces",
+			input:    []string{"\tuser@example.com\t"},
+			expected: []string{"user@example.com"},
+		},
+		{
+			name:     "large list",
+			input:    []string{"a@b.com", "c@d.com", "e@f.com", "g@h.com", "i@j.com"},
+			expected: []string{"a@b.com", "c@d.com", "e@f.com", "g@h.com", "i@j.com"},
+		},
+		{
+			name:      "email missing @",
+			input:     []string{"userexample.com"},
+			expectErr: true,
+		},
+		{
+			name:      "email missing domain",
+			input:     []string{"user@"},
+			expectErr: true,
+		},
+		{
+			name:      "email missing local part",
+			input:     []string{"@example.com"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseEmailRecipients(tt.input)
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("expected error for input %v, got nil", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(result) != len(tt.expected) {
+				t.Errorf("expected %d recipients, got %d", len(tt.expected), len(result))
+				return
+			}
+			for i, email := range result {
+				if email != tt.expected[i] {
+					t.Errorf("expected %q at index %d, got %q", tt.expected[i], i, email)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildReplySubject(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "plain subject",
+			input:    "Hello World",
+			expected: "Re: Hello World",
+		},
+		{
+			name:     "empty subject",
+			input:    "",
+			expected: "Re: ",
+		},
+		{
+			name:     "already has Re:",
+			input:    "Re: Hello World",
+			expected: "Re: Hello World",
+		},
+		{
+			name:     "lowercase re:",
+			input:    "re: Hello World",
+			expected: "re: Hello World",
+		},
+		{
+			name:     "RE: uppercase",
+			input:    "RE: Hello World",
+			expected: "RE: Hello World",
+		},
+		{
+			name:     "Re: with extra spaces",
+			input:    "Re:  Hello World",
+			expected: "Re:  Hello World",
+		},
+		{
+			name:     "subject starting with Re but not prefix",
+			input:    "Regarding your request",
+			expected: "Re: Regarding your request",
+		},
+		{
+			name:     "subject with just 'Re'",
+			input:    "Re",
+			expected: "Re: Re",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildReplySubject(tt.input)
+			if result != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestMailSendCmd_Validation(t *testing.T) {
+	tests := []struct {
+		name      string
+		to        []string
+		expectErr bool
+	}{
+		{
+			name:      "empty to list",
+			to:        []string{},
+			expectErr: true,
+		},
+		{
+			name:      "nil to list",
+			to:        nil,
+			expectErr: true,
+		},
+		{
+			name:      "with recipients",
+			to:        []string{"user@example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "multiple recipients",
+			to:        []string{"user1@example.com", "user2@example.com"},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origTo := mailSendTo
+			mailSendTo = tt.to
+
+			mockCmd := &cobra.Command{Use: "test"}
+
+			err := mailSendCmd.PreRunE(mockCmd, []string{})
+
+			mailSendTo = origTo
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailReplyCmd_Validation(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		expectErr bool
+	}{
+		{
+			name:      "empty body",
+			body:      "",
+			expectErr: true,
+		},
+		{
+			name:      "with body",
+			body:      "Thanks for your message!",
+			expectErr: false,
+		},
+		{
+			name:      "whitespace only body - still valid",
+			body:      "   ",
+			expectErr: false, // whitespace is technically non-empty
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origBody := mailReplyBody
+			mailReplyBody = tt.body
+
+			mockCmd := &cobra.Command{Use: "test"}
+
+			err := mailReplyCmd.PreRunE(mockCmd, []string{"msg123"})
+
+			mailReplyBody = origBody
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailForwardCmd_Validation(t *testing.T) {
+	tests := []struct {
+		name      string
+		to        []string
+		expectErr bool
+	}{
+		{
+			name:      "empty to list",
+			to:        []string{},
+			expectErr: true,
+		},
+		{
+			name:      "nil to list",
+			to:        nil,
+			expectErr: true,
+		},
+		{
+			name:      "with recipients",
+			to:        []string{"user@example.com"},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origTo := mailForwardTo
+			mailForwardTo = tt.to
+
+			mockCmd := &cobra.Command{Use: "test"}
+
+			err := mailForwardCmd.PreRunE(mockCmd, []string{"msg123"})
+
+			mailForwardTo = origTo
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailReplyCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"msg123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"msg123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := mailReplyCmd.Args(mailReplyCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailForwardCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"msg123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"msg123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := mailForwardCmd.Args(mailForwardCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailComposeCmd_SubcommandsRegistered(t *testing.T) {
+	subcommands := map[string]bool{
+		"send":    false,
+		"reply":   false,
+		"forward": false,
+	}
+
+	for _, sub := range mailCmd.Commands() {
+		if _, ok := subcommands[sub.Name()]; ok {
+			subcommands[sub.Name()] = true
+		}
+	}
+
+	for name, found := range subcommands {
+		if !found {
+			t.Errorf("expected subcommand %s to be registered with mailCmd", name)
+		}
+	}
+}
+
+func TestMailSendCmd_HasRequiredFlags(t *testing.T) {
+	flags := []string{"to", "cc", "bcc", "subject", "body", "html"}
+
+	for _, flagName := range flags {
+		flag := mailSendCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on send command", flagName)
+		}
+	}
+}
+
+func TestMailReplyCmd_HasRequiredFlags(t *testing.T) {
+	flags := []string{"body", "all"}
+
+	for _, flagName := range flags {
+		flag := mailReplyCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on reply command", flagName)
+		}
+	}
+}
+
+func TestMailForwardCmd_HasRequiredFlags(t *testing.T) {
+	flags := []string{"to", "body"}
+
+	for _, flagName := range flags {
+		flag := mailForwardCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on forward command", flagName)
+		}
 	}
 }

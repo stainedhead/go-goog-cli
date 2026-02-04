@@ -9,9 +9,6 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/adapter/presenter"
 	"github.com/stainedhead/go-goog-cli/internal/adapter/repository"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/keyring"
-	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 // Command flags for mail actions.
@@ -302,32 +299,9 @@ func init() {
 // getGmailRepository creates a GmailRepository using the current account's credentials.
 // Returns the repository and the sender's email address.
 func getGmailRepository(ctx context.Context) (*repository.GmailRepository, string, error) {
-	// Load config
-	cfg, err := config.Load()
+	tokenSource, email, err := getTokenSourceWithEmail(ctx)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, nil)
-
-	// Resolve account
-	acc, err := svc.ResolveAccount(accountFlag)
-	if err != nil {
-		return nil, "", fmt.Errorf("no account found: %w (run 'goog auth login' to authenticate)", err)
-	}
-
-	// Get token source
-	tokenMgr := svc.GetTokenManager()
-	tokenSource, err := tokenMgr.GetTokenSource(ctx, acc.Alias)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get token: %w (run 'goog auth login' to authenticate)", err)
+		return nil, "", err
 	}
 
 	// Create Gmail repository
@@ -336,7 +310,7 @@ func getGmailRepository(ctx context.Context) (*repository.GmailRepository, strin
 		return nil, "", fmt.Errorf("failed to create Gmail client: %w", err)
 	}
 
-	return repo, acc.Email, nil
+	return repo, email, nil
 }
 
 // runMailList handles the mail list command.

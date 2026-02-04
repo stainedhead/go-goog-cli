@@ -236,3 +236,196 @@ func TestThreadModifyCmd_HasRemoveLabelsFlag(t *testing.T) {
 		t.Error("expected --remove-labels flag to be set")
 	}
 }
+
+func TestThreadShowCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"thread123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"thread123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := threadShowCmd.Args(threadShowCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestThreadTrashCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"thread123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"thread123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := threadTrashCmd.Args(threadTrashCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestThreadModifyCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"thread123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"thread123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := threadModifyCmd.Args(threadModifyCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestThreadCmd_SubcommandsRegistered(t *testing.T) {
+	subcommands := map[string]bool{
+		"list":   false,
+		"show":   false,
+		"trash":  false,
+		"modify": false,
+	}
+
+	for _, sub := range threadCmd.Commands() {
+		if _, ok := subcommands[sub.Name()]; ok {
+			subcommands[sub.Name()] = true
+		}
+	}
+
+	for name, found := range subcommands {
+		if !found {
+			t.Errorf("expected subcommand %s to be registered with threadCmd", name)
+		}
+	}
+}
+
+func TestThreadListCmd_HasAllFlags(t *testing.T) {
+	flags := []string{"max-results", "labels"}
+
+	for _, flagName := range flags {
+		flag := threadListCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on list command", flagName)
+		}
+	}
+}
+
+func TestThreadModifyCmd_HasAllFlags(t *testing.T) {
+	flags := []string{"add-labels", "remove-labels"}
+
+	for _, flagName := range flags {
+		flag := threadModifyCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on modify command", flagName)
+		}
+	}
+}
+
+func TestThreadShowCmd_HasIdArg(t *testing.T) {
+	// Check that Use string contains <id>
+	if !contains(threadShowCmd.Use, "<id>") {
+		t.Error("expected Use to contain '<id>'")
+	}
+}
+
+func TestThreadTrashCmd_HasIdArg(t *testing.T) {
+	// Check that Use string contains <id>
+	if !contains(threadTrashCmd.Use, "<id>") {
+		t.Error("expected Use to contain '<id>'")
+	}
+}
+
+func TestThreadModifyCmd_HasIdArg(t *testing.T) {
+	// Check that Use string contains <id>
+	if !contains(threadModifyCmd.Use, "<id>") {
+		t.Error("expected Use to contain '<id>'")
+	}
+}
+
+func TestThreadListCmd_DefaultMaxResults(t *testing.T) {
+	flag := threadListCmd.Flag("max-results")
+	if flag == nil {
+		t.Fatal("expected --max-results flag to be set")
+	}
+
+	// Check default value
+	if flag.DefValue != "20" {
+		t.Errorf("expected default max-results to be '20', got '%s'", flag.DefValue)
+	}
+}

@@ -11,9 +11,6 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/adapter/presenter"
 	"github.com/stainedhead/go-goog-cli/internal/adapter/repository"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/keyring"
-	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 // Command flags for calendar utilities.
@@ -197,32 +194,9 @@ func init() {
 
 // getGCalService creates a GCalService using the current account's credentials.
 func getGCalService(ctx context.Context) (*repository.GCalService, error) {
-	// Load config
-	cfg, err := config.Load()
+	tokenSource, err := getTokenSource(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, nil)
-
-	// Resolve account
-	acc, err := svc.ResolveAccount(accountFlag)
-	if err != nil {
-		return nil, fmt.Errorf("no account found: %w (run 'goog auth login' to authenticate)", err)
-	}
-
-	// Get token source
-	tokenMgr := svc.GetTokenManager()
-	tokenSource, err := tokenMgr.GetTokenSource(ctx, acc.Alias)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token: %w (run 'goog auth login' to authenticate)", err)
+		return nil, err
 	}
 
 	// Create GCal service

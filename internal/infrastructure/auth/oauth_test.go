@@ -5,12 +5,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 // TestGenerateCodeVerifier tests that the code verifier meets PKCE requirements.
@@ -426,4 +430,269 @@ func setEnvForTest(key, value string) {
 	} else {
 		setEnv(key, value)
 	}
+}
+
+// TestNewOAuthConfigWithCredentials tests OAuth config creation with explicit credentials.
+func TestNewOAuthConfigWithCredentials(t *testing.T) {
+	clientID := "explicit-client-id"
+	clientSecret := "explicit-client-secret"
+	scopes := []string{ScopeGmailReadonly, ScopeCalendarReadonly}
+
+	t.Run("uses provided credentials", func(t *testing.T) {
+		cfg := NewOAuthConfigWithCredentials(clientID, clientSecret, scopes, 9000)
+		if cfg.ClientID != clientID {
+			t.Errorf("expected client ID %q, got %q", clientID, cfg.ClientID)
+		}
+		if cfg.ClientSecret != clientSecret {
+			t.Errorf("expected client secret %q, got %q", clientSecret, cfg.ClientSecret)
+		}
+	})
+
+	t.Run("uses custom port", func(t *testing.T) {
+		cfg := NewOAuthConfigWithCredentials(clientID, clientSecret, scopes, 9000)
+		if !strings.Contains(cfg.RedirectURL, ":9000") {
+			t.Errorf("expected redirect URL to contain port 9000, got %q", cfg.RedirectURL)
+		}
+	})
+
+	t.Run("uses default port when 0", func(t *testing.T) {
+		cfg := NewOAuthConfigWithCredentials(clientID, clientSecret, scopes, 0)
+		expectedPort := fmt.Sprintf(":%d", DefaultRedirectPort)
+		if !strings.Contains(cfg.RedirectURL, expectedPort) {
+			t.Errorf("expected redirect URL to contain default port %s, got %q", expectedPort, cfg.RedirectURL)
+		}
+	})
+
+	t.Run("scopes are correctly set", func(t *testing.T) {
+		cfg := NewOAuthConfigWithCredentials(clientID, clientSecret, scopes, 0)
+		if len(cfg.Scopes) != 2 {
+			t.Errorf("expected 2 scopes, got %d", len(cfg.Scopes))
+		}
+	})
+}
+
+// TestNewOAuthConfigWithCustomPort tests OAuth config with custom redirect port.
+func TestNewOAuthConfigWithCustomPort(t *testing.T) {
+	// Save and restore env vars
+	origClientID := getEnvOrDefault("GOOG_CLIENT_ID", "")
+	origClientSecret := getEnvOrDefault("GOOG_CLIENT_SECRET", "")
+	origPort := getEnvOrDefault("GOOG_REDIRECT_PORT", "")
+	defer func() {
+		setEnvForTest("GOOG_CLIENT_ID", origClientID)
+		setEnvForTest("GOOG_CLIENT_SECRET", origClientSecret)
+		setEnvForTest("GOOG_REDIRECT_PORT", origPort)
+	}()
+
+	setEnvForTest("GOOG_CLIENT_ID", "test-client-id")
+	setEnvForTest("GOOG_CLIENT_SECRET", "test-client-secret")
+
+	t.Run("uses custom port from environment", func(t *testing.T) {
+		setEnvForTest("GOOG_REDIRECT_PORT", "9999")
+		cfg := NewOAuthConfig([]string{ScopeGmailReadonly})
+		if !strings.Contains(cfg.RedirectURL, ":9999") {
+			t.Errorf("expected redirect URL to contain port 9999, got %q", cfg.RedirectURL)
+		}
+	})
+
+	t.Run("uses default port when env not set", func(t *testing.T) {
+		setEnvForTest("GOOG_REDIRECT_PORT", "")
+		cfg := NewOAuthConfig([]string{ScopeGmailReadonly})
+		expectedPort := fmt.Sprintf(":%d", DefaultRedirectPort)
+		if !strings.Contains(cfg.RedirectURL, expectedPort) {
+			t.Errorf("expected redirect URL to contain default port, got %q", cfg.RedirectURL)
+		}
+	})
+}
+
+// TestValidateConfig tests OAuth configuration validation.
+func TestValidateConfig(t *testing.T) {
+	t.Run("returns error for missing client ID", func(t *testing.T) {
+		cfg := &oauth2.Config{
+			ClientID:     "",
+			ClientSecret: "secret",
+		}
+		err := ValidateConfig(cfg)
+		if err == nil {
+			t.Error("expected error for missing client ID")
+		}
+		if err != ErrMissingClientID {
+			t.Errorf("expected ErrMissingClientID, got %v", err)
+		}
+	})
+
+	t.Run("returns error for missing client secret", func(t *testing.T) {
+		cfg := &oauth2.Config{
+			ClientID:     "client-id",
+			ClientSecret: "",
+		}
+		err := ValidateConfig(cfg)
+		if err == nil {
+			t.Error("expected error for missing client secret")
+		}
+		if err != ErrMissingClientSecret {
+			t.Errorf("expected ErrMissingClientSecret, got %v", err)
+		}
+	})
+
+	t.Run("returns nil for valid config", func(t *testing.T) {
+		cfg := &oauth2.Config{
+			ClientID:     "client-id",
+			ClientSecret: "client-secret",
+		}
+		err := ValidateConfig(cfg)
+		if err != nil {
+			t.Errorf("expected no error for valid config, got %v", err)
+		}
+	})
+}
+
+// TestCallbackServerGetServerURL tests the GetServerURL method.
+func TestCallbackServerGetServerURL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	server, serverURL, err := StartCallbackServer(ctx, 0)
+	if err != nil {
+		t.Fatalf("failed to start callback server: %v", err)
+	}
+
+	t.Run("returns correct server URL", func(t *testing.T) {
+		gotURL := server.GetServerURL()
+		if gotURL != serverURL {
+			t.Errorf("expected server URL %q, got %q", serverURL, gotURL)
+		}
+		if !strings.HasPrefix(gotURL, "http://localhost:") {
+			t.Errorf("expected URL to start with http://localhost:, got %q", gotURL)
+		}
+	})
+
+	// Clean up by triggering a callback
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		http.Get(serverURL + "/callback?code=cleanup")
+	}()
+	WaitForCallback(ctx, server)
+}
+
+// TestCallbackServerNoAuthCode tests callback with no authorization code.
+func TestCallbackServerNoAuthCode(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	server, serverURL, err := StartCallbackServer(ctx, 0)
+	if err != nil {
+		t.Fatalf("failed to start callback server: %v", err)
+	}
+
+	errChan := make(chan error, 1)
+	go func() {
+		_, err := WaitForCallback(ctx, server)
+		errChan <- err
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Simulate callback without code
+	callbackURL := serverURL + "/callback"
+	resp, err := http.Get(callbackURL)
+	if err != nil {
+		t.Fatalf("failed to make callback request: %v", err)
+	}
+	resp.Body.Close()
+
+	select {
+	case err := <-errChan:
+		if err == nil {
+			t.Error("expected error for missing auth code")
+		}
+		if err != ErrNoAuthCode {
+			t.Errorf("expected ErrNoAuthCode, got %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for error")
+	}
+}
+
+// TestCallbackServerTimeout tests callback server timeout behavior.
+func TestCallbackServerTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	server, _, err := StartCallbackServer(ctx, 0)
+	if err != nil {
+		t.Fatalf("failed to start callback server: %v", err)
+	}
+
+	t.Run("returns error on context timeout", func(t *testing.T) {
+		_, err := WaitForCallback(ctx, server)
+		if err == nil {
+			t.Error("expected timeout error")
+		}
+		if !strings.Contains(err.Error(), "context deadline exceeded") {
+			t.Errorf("expected context deadline error, got %v", err)
+		}
+	})
+}
+
+// TestStartCallbackServerWithSpecificPort tests starting server on a specific port.
+func TestStartCallbackServerWithSpecificPort(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Start server on a specific port
+	server, serverURL, err := StartCallbackServer(ctx, 18765)
+	if err != nil {
+		t.Fatalf("failed to start callback server: %v", err)
+	}
+
+	t.Run("server uses requested port", func(t *testing.T) {
+		if !strings.Contains(serverURL, ":18765") {
+			t.Errorf("expected server URL to contain port 18765, got %q", serverURL)
+		}
+	})
+
+	// Clean up
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		http.Get(serverURL + "/callback?code=cleanup")
+	}()
+	WaitForCallback(ctx, server)
+}
+
+// TestGenerateCodeVerifierUniqueness tests that code verifiers are unique.
+func TestGenerateCodeVerifierUniqueness(t *testing.T) {
+	verifiers := make(map[string]bool)
+	numIterations := 100
+
+	for i := 0; i < numIterations; i++ {
+		v := GenerateCodeVerifier()
+		if verifiers[v] {
+			t.Errorf("duplicate verifier generated on iteration %d", i)
+		}
+		verifiers[v] = true
+	}
+
+	if len(verifiers) != numIterations {
+		t.Errorf("expected %d unique verifiers, got %d", numIterations, len(verifiers))
+	}
+}
+
+// TestOpenBrowser tests the OpenBrowser function for various platforms.
+// Note: This test doesn't actually open a browser; it just verifies the function exists
+// and handles the current platform.
+func TestOpenBrowser(t *testing.T) {
+	// Skip this test in CI environments where browsers may not be available
+	if os.Getenv("CI") == "true" {
+		t.Skip("skipping browser test in CI environment")
+	}
+
+	// We can't fully test OpenBrowser without side effects, but we can
+	// verify it doesn't panic and returns appropriate errors for invalid URLs
+	t.Run("handles non-existent URL gracefully", func(t *testing.T) {
+		// This will start a process but it will fail quickly
+		// We're mainly testing that the function doesn't panic
+		err := OpenBrowser("http://127.0.0.1:1") // Invalid URL that should fail
+		// We don't check the error because the behavior is platform-dependent
+		_ = err
+	})
 }

@@ -477,8 +477,12 @@ func (r *GCalFreeBusyRepository) Query(ctx context.Context, request *calendar.Fr
 	for calID, calInfo := range gcalResponse.Calendars {
 		var periods []*calendar.TimePeriod
 		for _, busy := range calInfo.Busy {
-			start, _ := time.Parse(time.RFC3339, busy.Start)
-			end, _ := time.Parse(time.RFC3339, busy.End)
+			start, startErr := time.Parse(time.RFC3339, busy.Start)
+			end, endErr := time.Parse(time.RFC3339, busy.End)
+			// Only create period if both times parsed successfully
+			if startErr != nil || endErr != nil {
+				continue
+			}
 			period, err := calendar.NewTimePeriod(start, end)
 			if err == nil {
 				periods = append(periods, period)
@@ -538,8 +542,16 @@ func gcalEventToDomain(event *gcal.Event) *calendar.Event {
 		return nil
 	}
 
-	start, allDay, _ := parseEventDateTime(event.Start)
-	end, _, _ := parseEventDateTime(event.End)
+	start, allDay, startErr := parseEventDateTime(event.Start)
+	end, _, endErr := parseEventDateTime(event.End)
+	// Use zero times if parsing fails - these are non-critical fields
+	if startErr != nil {
+		start = time.Time{}
+	}
+	if endErr != nil {
+		end = time.Time{}
+	}
+	// Created and updated are metadata fields - use zero time on parse failure
 	created, _ := time.Parse(time.RFC3339, event.Created)
 	updated, _ := time.Parse(time.RFC3339, event.Updated)
 

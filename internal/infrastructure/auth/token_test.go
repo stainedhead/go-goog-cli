@@ -407,3 +407,392 @@ func TestTokenExpired(t *testing.T) {
 		}
 	})
 }
+
+// TestGetTokenInfo tests retrieving token info.
+func TestGetTokenInfo(t *testing.T) {
+	store := newMockStore()
+	manager := NewTokenManager(store)
+
+	t.Run("returns info for non-existent account", func(t *testing.T) {
+		info, err := manager.GetTokenInfo("nonexistent@example.com")
+		if err != nil {
+			t.Fatalf("GetTokenInfo failed: %v", err)
+		}
+		if info.HasToken {
+			t.Error("expected HasToken to be false")
+		}
+		if info.Account != "nonexistent@example.com" {
+			t.Errorf("expected account 'nonexistent@example.com', got %q", info.Account)
+		}
+	})
+
+	t.Run("returns info for valid account with token", func(t *testing.T) {
+		account := "info@example.com"
+		token := &oauth2.Token{
+			AccessToken:  "test-access-token",
+			TokenType:    "Bearer",
+			RefreshToken: "test-refresh-token",
+			Expiry:       time.Now().Add(time.Hour),
+		}
+		if err := manager.SaveToken(account, token); err != nil {
+			t.Fatalf("SaveToken failed: %v", err)
+		}
+		if err := manager.SaveScopes(account, []string{ScopeGmailReadonly, ScopeCalendarReadonly}); err != nil {
+			t.Fatalf("SaveScopes failed: %v", err)
+		}
+
+		info, err := manager.GetTokenInfo(account)
+		if err != nil {
+			t.Fatalf("GetTokenInfo failed: %v", err)
+		}
+
+		if !info.HasToken {
+			t.Error("expected HasToken to be true")
+		}
+		if info.IsExpired {
+			t.Error("expected IsExpired to be false for valid token")
+		}
+		if info.TokenType != "Bearer" {
+			t.Errorf("expected TokenType 'Bearer', got %q", info.TokenType)
+		}
+		if len(info.Scopes) != 2 {
+			t.Errorf("expected 2 scopes, got %d", len(info.Scopes))
+		}
+		if info.ExpiryTime == "" {
+			t.Error("expected ExpiryTime to be set")
+		}
+	})
+
+	t.Run("returns info for expired token", func(t *testing.T) {
+		account := "expired@example.com"
+		token := &oauth2.Token{
+			AccessToken:  "expired-access-token",
+			TokenType:    "Bearer",
+			RefreshToken: "refresh-token",
+			Expiry:       time.Now().Add(-time.Hour), // Expired
+		}
+		if err := manager.SaveToken(account, token); err != nil {
+			t.Fatalf("SaveToken failed: %v", err)
+		}
+
+		info, err := manager.GetTokenInfo(account)
+		if err != nil {
+			t.Fatalf("GetTokenInfo failed: %v", err)
+		}
+
+		if !info.HasToken {
+			t.Error("expected HasToken to be true")
+		}
+		if !info.IsExpired {
+			t.Error("expected IsExpired to be true for expired token")
+		}
+	})
+
+	t.Run("returns info with token but no scopes", func(t *testing.T) {
+		account := "noscopes@example.com"
+		token := &oauth2.Token{
+			AccessToken:  "test-access-token",
+			TokenType:    "Bearer",
+			RefreshToken: "test-refresh-token",
+			Expiry:       time.Now().Add(time.Hour),
+		}
+		if err := manager.SaveToken(account, token); err != nil {
+			t.Fatalf("SaveToken failed: %v", err)
+		}
+		// Don't save any scopes
+
+		info, err := manager.GetTokenInfo(account)
+		if err != nil {
+			t.Fatalf("GetTokenInfo failed: %v", err)
+		}
+
+		if !info.HasToken {
+			t.Error("expected HasToken to be true")
+		}
+		if len(info.Scopes) != 0 {
+			t.Errorf("expected empty scopes, got %v", info.Scopes)
+		}
+	})
+}
+
+// TestDeleteTokenIdempotency tests that deleting tokens is idempotent.
+func TestDeleteTokenIdempotency(t *testing.T) {
+	store := newMockStore()
+	manager := NewTokenManager(store)
+
+	account := "idempotent@example.com"
+	token := &oauth2.Token{
+		AccessToken:  "test-access-token",
+		TokenType:    "Bearer",
+		RefreshToken: "test-refresh-token",
+		Expiry:       time.Now().Add(time.Hour),
+	}
+
+	// Save token
+	if err := manager.SaveToken(account, token); err != nil {
+		t.Fatalf("SaveToken failed: %v", err)
+	}
+
+	// Delete once
+	if err := manager.DeleteToken(account); err != nil {
+		t.Fatalf("first DeleteToken failed: %v", err)
+	}
+
+	// Delete again (should not error)
+	if err := manager.DeleteToken(account); err != nil {
+		t.Fatalf("second DeleteToken failed: %v", err)
+	}
+
+	// Delete third time (still should not error)
+	if err := manager.DeleteToken(account); err != nil {
+		t.Fatalf("third DeleteToken failed: %v", err)
+	}
+}
+
+// TestSaveLoadTokenRoundTrip tests saving and loading tokens preserves data.
+func TestSaveLoadTokenRoundTrip(t *testing.T) {
+	store := newMockStore()
+	manager := NewTokenManager(store)
+
+	account := "roundtrip@example.com"
+	expiry := time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC)
+	token := &oauth2.Token{
+		AccessToken:  "access-token-abc123",
+		TokenType:    "Bearer",
+		RefreshToken: "refresh-token-xyz789",
+		Expiry:       expiry,
+	}
+
+	// Save
+	if err := manager.SaveToken(account, token); err != nil {
+		t.Fatalf("SaveToken failed: %v", err)
+	}
+
+	// Load
+	loaded, err := manager.LoadToken(account)
+	if err != nil {
+		t.Fatalf("LoadToken failed: %v", err)
+	}
+
+	// Verify all fields match
+	if loaded.AccessToken != token.AccessToken {
+		t.Errorf("AccessToken mismatch: got %q, want %q", loaded.AccessToken, token.AccessToken)
+	}
+	if loaded.TokenType != token.TokenType {
+		t.Errorf("TokenType mismatch: got %q, want %q", loaded.TokenType, token.TokenType)
+	}
+	if loaded.RefreshToken != token.RefreshToken {
+		t.Errorf("RefreshToken mismatch: got %q, want %q", loaded.RefreshToken, token.RefreshToken)
+	}
+	if !loaded.Expiry.Equal(token.Expiry) {
+		t.Errorf("Expiry mismatch: got %v, want %v", loaded.Expiry, token.Expiry)
+	}
+}
+
+// errorStore is a mock store that returns errors for testing error handling.
+type errorStore struct {
+	getErr    error
+	setErr    error
+	deleteErr error
+	listErr   error
+}
+
+func (s *errorStore) Set(account, key string, value []byte) error { return s.setErr }
+func (s *errorStore) Get(account, key string) ([]byte, error)     { return nil, s.getErr }
+func (s *errorStore) Delete(account, key string) error            { return s.deleteErr }
+func (s *errorStore) List(account string) ([]string, error)       { return nil, s.listErr }
+
+// TestLoadTokenErrorHandling tests error handling when loading tokens.
+func TestLoadTokenErrorHandling(t *testing.T) {
+	t.Run("returns error for corrupted token data", func(t *testing.T) {
+		store := newMockStore()
+		manager := NewTokenManager(store)
+
+		account := "corrupted@example.com"
+		// Store invalid JSON data
+		store.Set(account, KeyToken, []byte("not valid json"))
+
+		_, err := manager.LoadToken(account)
+		if err == nil {
+			t.Error("expected error for corrupted token data")
+		}
+	})
+
+	t.Run("wraps store errors", func(t *testing.T) {
+		customErr := errKeyNotFound
+		store := &errorStore{getErr: customErr}
+		manager := NewTokenManager(store)
+
+		_, err := manager.LoadToken("any@example.com")
+		if err == nil {
+			t.Error("expected error from store")
+		}
+		// Should return ErrTokenNotFound for key not found errors
+		if err != ErrTokenNotFound {
+			t.Errorf("expected ErrTokenNotFound, got %v", err)
+		}
+	})
+}
+
+// TestSaveTokenErrorHandling tests error handling when saving tokens.
+func TestSaveTokenErrorHandling(t *testing.T) {
+	t.Run("wraps store errors", func(t *testing.T) {
+		customErr := errKeyNotFound // Use any error
+		store := &errorStore{setErr: customErr}
+		manager := NewTokenManager(store)
+
+		token := &oauth2.Token{
+			AccessToken: "test",
+		}
+
+		err := manager.SaveToken("any@example.com", token)
+		if err == nil {
+			t.Error("expected error from store")
+		}
+	})
+}
+
+// TestGetGrantedScopesErrorHandling tests error handling when getting scopes.
+func TestGetGrantedScopesErrorHandling(t *testing.T) {
+	t.Run("returns error for corrupted scope data", func(t *testing.T) {
+		store := newMockStore()
+		manager := NewTokenManager(store)
+
+		account := "corrupted@example.com"
+		// Store invalid JSON data for scopes
+		store.Set(account, KeyScopes, []byte("not valid json"))
+
+		_, err := manager.GetGrantedScopes(account)
+		if err == nil {
+			t.Error("expected error for corrupted scope data")
+		}
+	})
+
+	t.Run("returns ErrScopesNotSet for missing scopes", func(t *testing.T) {
+		store := newMockStore()
+		manager := NewTokenManager(store)
+
+		_, err := manager.GetGrantedScopes("nosuch@example.com")
+		if err != ErrScopesNotSet {
+			t.Errorf("expected ErrScopesNotSet, got %v", err)
+		}
+	})
+}
+
+// TestIsKeyNotFoundError tests the isKeyNotFoundError helper function.
+func TestIsKeyNotFoundError(t *testing.T) {
+	testCases := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"internal errKeyNotFound", errKeyNotFound, true},
+		{"key not found message", customError("key not found"), true},
+		{"secret not found in keyring", customError("secret not found in keyring"), true},
+		{"other error", customError("some other error"), false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := isKeyNotFoundError(tc.err)
+			if result != tc.expected {
+				t.Errorf("isKeyNotFoundError(%v) = %v, want %v", tc.err, result, tc.expected)
+			}
+		})
+	}
+}
+
+// customError is a simple error type for testing.
+type customError string
+
+func (e customError) Error() string { return string(e) }
+
+// TestSaveScopesErrorHandling tests error handling when saving scopes.
+func TestSaveScopesErrorHandling(t *testing.T) {
+	t.Run("wraps store errors", func(t *testing.T) {
+		customErr := errKeyNotFound
+		store := &errorStore{setErr: customErr}
+		manager := NewTokenManager(store)
+
+		err := manager.SaveScopes("any@example.com", []string{"scope1"})
+		if err == nil {
+			t.Error("expected error from store")
+		}
+	})
+}
+
+// TestDeleteTokenWithScopesAlsoDeletesScopes tests that deleting a token also deletes scopes.
+func TestDeleteTokenWithScopesAlsoDeletesScopes(t *testing.T) {
+	store := newMockStore()
+	manager := NewTokenManager(store)
+
+	account := "withscopes@example.com"
+	token := &oauth2.Token{
+		AccessToken:  "test-access-token",
+		TokenType:    "Bearer",
+		RefreshToken: "test-refresh-token",
+		Expiry:       time.Now().Add(time.Hour),
+	}
+
+	// Save token and scopes
+	if err := manager.SaveToken(account, token); err != nil {
+		t.Fatalf("SaveToken failed: %v", err)
+	}
+	if err := manager.SaveScopes(account, []string{ScopeGmailReadonly}); err != nil {
+		t.Fatalf("SaveScopes failed: %v", err)
+	}
+
+	// Verify scopes exist
+	_, err := manager.GetGrantedScopes(account)
+	if err != nil {
+		t.Fatalf("GetGrantedScopes before delete failed: %v", err)
+	}
+
+	// Delete token
+	if err := manager.DeleteToken(account); err != nil {
+		t.Fatalf("DeleteToken failed: %v", err)
+	}
+
+	// Verify scopes are also deleted
+	_, err = manager.GetGrantedScopes(account)
+	if err != ErrScopesNotSet {
+		t.Errorf("expected ErrScopesNotSet after delete, got %v", err)
+	}
+}
+
+// TestHasScopeEdgeCases tests edge cases for HasScope.
+func TestHasScopeEdgeCases(t *testing.T) {
+	store := newMockStore()
+	manager := NewTokenManager(store)
+
+	account := "hasscope@example.com"
+	if err := manager.SaveScopes(account, []string{ScopeGmailReadonly, ScopeCalendarReadonly}); err != nil {
+		t.Fatalf("SaveScopes failed: %v", err)
+	}
+
+	t.Run("returns true for first scope in list", func(t *testing.T) {
+		if !manager.HasScope(account, ScopeGmailReadonly) {
+			t.Error("expected HasScope to return true for first scope")
+		}
+	})
+
+	t.Run("returns true for last scope in list", func(t *testing.T) {
+		if !manager.HasScope(account, ScopeCalendarReadonly) {
+			t.Error("expected HasScope to return true for last scope")
+		}
+	})
+
+	t.Run("returns false for partial scope match", func(t *testing.T) {
+		// ScopeGmailReadonly is the full scope, "gmail" is just a partial match
+		if manager.HasScope(account, "gmail") {
+			t.Error("expected HasScope to return false for partial match")
+		}
+	})
+
+	t.Run("returns false for empty scope", func(t *testing.T) {
+		if manager.HasScope(account, "") {
+			t.Error("expected HasScope to return false for empty scope")
+		}
+	})
+}

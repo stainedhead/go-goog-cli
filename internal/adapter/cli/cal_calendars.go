@@ -9,9 +9,6 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/adapter/presenter"
 	"github.com/stainedhead/go-goog-cli/internal/adapter/repository"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/keyring"
-	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 // Calendar management command flags.
@@ -130,6 +127,12 @@ Requires --confirm flag for safety.`,
 	Example: `  # Delete a calendar (requires confirmation)
   goog cal calendars delete "example@group.calendar.google.com" --confirm`,
 	Args: cobra.ExactArgs(1),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if !calendarsConfirm {
+			return fmt.Errorf("deletion requires --confirm flag")
+		}
+		return nil
+	},
 	RunE: runCalendarsDelete,
 }
 
@@ -148,6 +151,12 @@ Requires --confirm flag for safety.`,
 	Example: `  # Clear all events from primary calendar (requires confirmation)
   goog cal calendars clear primary --confirm`,
 	Args: cobra.ExactArgs(1),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if !calendarsConfirm {
+			return fmt.Errorf("clearing all events requires --confirm flag")
+		}
+		return nil
+	},
 	RunE: runCalendarsClear,
 }
 
@@ -183,32 +192,9 @@ func init() {
 
 // getCalendarRepository creates a calendar repository for the current account.
 func getCalendarRepository(ctx context.Context) (*repository.GCalCalendarRepository, error) {
-	// Load config
-	cfg, err := config.Load()
+	tokenSource, err := getTokenSource(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, nil)
-
-	// Resolve account
-	acc, err := svc.ResolveAccount(accountFlag)
-	if err != nil {
-		return nil, fmt.Errorf("no account found: %w", err)
-	}
-
-	// Get token source
-	tokenMgr := svc.GetTokenManager()
-	tokenSource, err := tokenMgr.GetTokenSource(ctx, acc.Alias)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token: %w", err)
+		return nil, err
 	}
 
 	// Create GCal service
@@ -362,11 +348,6 @@ func runCalendarsDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	calendarID := args[0]
 
-	// Require confirmation
-	if !calendarsConfirm {
-		return fmt.Errorf("deletion requires --confirm flag")
-	}
-
 	repo, err := getCalendarRepository(ctx)
 	if err != nil {
 		return err
@@ -403,11 +384,6 @@ func runCalendarsDelete(cmd *cobra.Command, args []string) error {
 func runCalendarsClear(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	calendarID := args[0]
-
-	// Require confirmation
-	if !calendarsConfirm {
-		return fmt.Errorf("clearing all events requires --confirm flag")
-	}
 
 	repo, err := getCalendarRepository(ctx)
 	if err != nil {

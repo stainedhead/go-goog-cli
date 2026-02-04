@@ -159,3 +159,99 @@ func TestMailListCmd_DefaultLabels(t *testing.T) {
 		t.Errorf("expected default labels to be [INBOX], got %v", mailListLabels)
 	}
 }
+
+func TestMailReadCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"message-id"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"message-id", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := mailReadCmd.Args(mailReadCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailSearchCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"is:unread"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"is:unread", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := mailSearchCmd.Args(mailSearchCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailListCmd_HasFlags(t *testing.T) {
+	flags := []string{"max-results", "labels", "unread-only"}
+
+	for _, flagName := range flags {
+		flag := mailListCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on list command", flagName)
+		}
+	}
+}
+
+func TestMailSearchCmd_HasFlags(t *testing.T) {
+	flag := mailSearchCmd.Flag("max-results")
+	if flag == nil {
+		t.Error("expected --max-results flag to be defined on search command")
+	}
+}

@@ -365,3 +365,204 @@ func TestCalendarsCmd_ViaCalendarTopLevel(t *testing.T) {
 		t.Error("expected output to contain 'list'")
 	}
 }
+
+func TestCalendarsShowCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"primary"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"primary", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := calendarsShowCmd.Args(calendarsShowCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalendarsUpdateCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"primary"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"primary", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := calendarsUpdateCmd.Args(calendarsUpdateCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalendarsDeleteCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"primary"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"primary", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := calendarsDeleteCmd.Args(calendarsDeleteCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalendarsClearCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"primary"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"primary", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := calendarsClearCmd.Args(calendarsClearCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalendarsCmd_SubcommandsRegistered(t *testing.T) {
+	subcommands := map[string]bool{
+		"list":   false,
+		"show":   false,
+		"create": false,
+		"update": false,
+		"delete": false,
+		"clear":  false,
+	}
+
+	for _, sub := range calendarsCmd.Commands() {
+		if _, ok := subcommands[sub.Name()]; ok {
+			subcommands[sub.Name()] = true
+		}
+	}
+
+	for name, found := range subcommands {
+		if !found {
+			t.Errorf("expected subcommand %s to be registered with calendarsCmd", name)
+		}
+	}
+}
+
+func TestCalendarsCreateCmd_HasFlags(t *testing.T) {
+	flags := []string{"title", "description", "timezone"}
+
+	for _, flagName := range flags {
+		flag := calendarsCreateCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on create command", flagName)
+		}
+	}
+}
+
+func TestCalendarsUpdateCmd_HasFlags(t *testing.T) {
+	flags := []string{"title", "description", "timezone"}
+
+	for _, flagName := range flags {
+		flag := calendarsUpdateCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("expected --%s flag to be defined on update command", flagName)
+		}
+	}
+}
