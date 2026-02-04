@@ -311,6 +311,52 @@ func (p *PlainPresenter) RenderCalendars(cals []*calendar.Calendar) string {
 	return strings.Join(lines, "\n")
 }
 
+// RenderACLRule renders a single ACL rule as key-value pairs.
+func (p *PlainPresenter) RenderACLRule(rule *calendar.ACLRule) string {
+	if rule == nil {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("ID: %s", rule.ID))
+	lines = append(lines, fmt.Sprintf("Role: %s", rule.Role))
+	if rule.Scope != nil {
+		lines = append(lines, fmt.Sprintf("ScopeType: %s", rule.Scope.Type))
+		if rule.Scope.Value != "" {
+			lines = append(lines, fmt.Sprintf("ScopeValue: %s", rule.Scope.Value))
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// RenderACLRules renders multiple ACL rules, one per line.
+func (p *PlainPresenter) RenderACLRules(rules []*calendar.ACLRule) string {
+	if len(rules) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		scopeType := ""
+		scopeValue := ""
+		if rule.Scope != nil {
+			scopeType = rule.Scope.Type
+			scopeValue = rule.Scope.Value
+		}
+		lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s",
+			rule.ID,
+			rule.Role,
+			scopeType,
+			scopeValue,
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // RenderAccount renders a single account as key-value pairs.
 func (p *PlainPresenter) RenderAccount(acct *account.Account) string {
 	if acct == nil {

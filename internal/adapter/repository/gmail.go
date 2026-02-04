@@ -49,6 +49,7 @@ var (
 	_ mail.MessageRepository = (*GmailRepository)(nil)
 	_ mail.DraftRepository   = (*GmailDraftRepository)(nil)
 	_ mail.LabelRepository   = (*GmailLabelRepository)(nil)
+	_ mail.ThreadRepository  = (*GmailThreadRepository)(nil)
 )
 
 // GmailDraftRepository wraps GmailRepository to implement DraftRepository.
@@ -69,6 +70,16 @@ type GmailLabelRepository struct {
 // NewGmailLabelRepository creates a new GmailLabelRepository.
 func NewGmailLabelRepository(repo *GmailRepository) *GmailLabelRepository {
 	return &GmailLabelRepository{GmailRepository: repo}
+}
+
+// GmailThreadRepository wraps GmailRepository to implement ThreadRepository.
+type GmailThreadRepository struct {
+	*GmailRepository
+}
+
+// NewGmailThreadRepository creates a new GmailThreadRepository.
+func NewGmailThreadRepository(repo *GmailRepository) *GmailThreadRepository {
+	return &GmailThreadRepository{GmailRepository: repo}
 }
 
 // NewGmailRepository creates a new GmailRepository with the given OAuth2 token source.
@@ -935,6 +946,158 @@ func domainLabelToGmail(label *mail.Label) *gmail.Label {
 			BackgroundColor: label.Color.Background,
 			TextColor:       label.Color.Text,
 		}
+	}
+
+	return result
+}
+
+// =============================================================================
+// ThreadRepository Implementation (GmailThreadRepository)
+// =============================================================================
+
+// List retrieves a list of threads.
+func (r *GmailThreadRepository) List(ctx context.Context, opts mail.ListOptions) (*mail.ListResult[*mail.Thread], error) {
+	call := r.service.Users.Threads.List(r.userID)
+
+	if opts.MaxResults > 0 {
+		call = call.MaxResults(int64(opts.MaxResults))
+	}
+	if opts.PageToken != "" {
+		call = call.PageToken(opts.PageToken)
+	}
+	if opts.Query != "" {
+		call = call.Q(opts.Query)
+	}
+	if len(opts.LabelIDs) > 0 {
+		call = call.LabelIds(opts.LabelIDs...)
+	}
+
+	response, err := call.Context(ctx).Do()
+	if err != nil {
+		return nil, r.handleError(err)
+	}
+
+	threads := make([]*mail.Thread, 0, len(response.Threads))
+	for _, gmailThread := range response.Threads {
+		// Create minimal thread from list response
+		thread := &mail.Thread{
+			ID:      gmailThread.Id,
+			Snippet: gmailThread.Snippet,
+		}
+		threads = append(threads, thread)
+	}
+
+	return &mail.ListResult[*mail.Thread]{
+		Items:         threads,
+		NextPageToken: response.NextPageToken,
+		Total:         int(response.ResultSizeEstimate),
+	}, nil
+}
+
+// Get retrieves a single thread by ID with all messages.
+func (r *GmailThreadRepository) Get(ctx context.Context, id string) (*mail.Thread, error) {
+	gmailThread, err := r.service.Users.Threads.Get(r.userID, id).
+		Format(gmailMessageFormat).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleThreadError(err)
+	}
+
+	return gmailThreadToDomain(gmailThread), nil
+}
+
+// Modify modifies the labels on a thread.
+func (r *GmailThreadRepository) Modify(ctx context.Context, id string, req mail.ModifyRequest) (*mail.Thread, error) {
+	modifyReq := &gmail.ModifyThreadRequest{
+		AddLabelIds:    req.AddLabels,
+		RemoveLabelIds: req.RemoveLabels,
+	}
+
+	gmailThread, err := r.service.Users.Threads.Modify(r.userID, id, modifyReq).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, r.handleThreadError(err)
+	}
+
+	return gmailThreadToDomain(gmailThread), nil
+}
+
+// Trash moves a thread to trash.
+func (r *GmailThreadRepository) Trash(ctx context.Context, id string) error {
+	_, err := r.service.Users.Threads.Trash(r.userID, id).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return r.handleThreadError(err)
+	}
+	return nil
+}
+
+// Untrash removes a thread from trash.
+func (r *GmailThreadRepository) Untrash(ctx context.Context, id string) error {
+	_, err := r.service.Users.Threads.Untrash(r.userID, id).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return r.handleThreadError(err)
+	}
+	return nil
+}
+
+// Delete permanently deletes a thread.
+func (r *GmailThreadRepository) Delete(ctx context.Context, id string) error {
+	err := r.service.Users.Threads.Delete(r.userID, id).
+		Context(ctx).
+		Do()
+	if err != nil {
+		return r.handleThreadError(err)
+	}
+	return nil
+}
+
+// handleThreadError maps Gmail API errors to domain thread errors.
+func (r *GmailRepository) handleThreadError(err error) error {
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.Code == http.StatusNotFound {
+			return fmt.Errorf("%w: %s", mail.ErrThreadNotFound, apiErr.Message)
+		}
+		return mapGmailError(apiErr.Code, apiErr.Message)
+	}
+	return fmt.Errorf("gmail error: %w", err)
+}
+
+// gmailThreadToDomain converts a Gmail API thread to a domain Thread.
+func gmailThreadToDomain(thread *gmail.Thread) *mail.Thread {
+	if thread == nil {
+		return nil
+	}
+
+	result := &mail.Thread{
+		ID:      thread.Id,
+		Snippet: thread.Snippet,
+	}
+
+	// Convert messages
+	if len(thread.Messages) > 0 {
+		result.Messages = make([]*mail.Message, 0, len(thread.Messages))
+		for _, gmailMsg := range thread.Messages {
+			result.Messages = append(result.Messages, gmailMessageToDomain(gmailMsg))
+		}
+
+		// Extract labels from the first message (threads share labels)
+		if len(thread.Messages[0].LabelIds) > 0 {
+			result.Labels = thread.Messages[0].LabelIds
+		}
+	}
+
+	if result.Messages == nil {
+		result.Messages = []*mail.Message{}
+	}
+	if result.Labels == nil {
+		result.Labels = []string{}
 	}
 
 	return result

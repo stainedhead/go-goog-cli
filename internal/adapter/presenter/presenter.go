@@ -31,6 +31,8 @@ type Presenter interface {
 	RenderEvents(events []*calendar.Event) string
 	RenderCalendar(cal *calendar.Calendar) string
 	RenderCalendars(cals []*calendar.Calendar) string
+	RenderACLRule(rule *calendar.ACLRule) string
+	RenderACLRules(rules []*calendar.ACLRule) string
 
 	// Account
 	RenderAccount(acct *account.Account) string

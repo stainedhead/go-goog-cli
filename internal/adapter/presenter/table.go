@@ -383,6 +383,59 @@ func (p *TablePresenter) RenderCalendars(cals []*calendar.Calendar) string {
 	return buf.String()
 }
 
+// RenderACLRule renders a single ACL rule as a table.
+func (p *TablePresenter) RenderACLRule(rule *calendar.ACLRule) string {
+	if rule == nil {
+		return "No ACL rule found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"Field", "Value"})
+
+	_ = table.Append([]string{"ID", rule.ID})
+	_ = table.Append([]string{"Role", rule.Role})
+	if rule.Scope != nil {
+		_ = table.Append([]string{"Scope Type", rule.Scope.Type})
+		if rule.Scope.Value != "" {
+			_ = table.Append([]string{"Scope Value", rule.Scope.Value})
+		}
+	}
+
+	_ = table.Render()
+	return buf.String()
+}
+
+// RenderACLRules renders multiple ACL rules as a table.
+func (p *TablePresenter) RenderACLRules(rules []*calendar.ACLRule) string {
+	if len(rules) == 0 {
+		return "No ACL rules found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"ID", "Role", "Scope Type", "Scope Value"})
+
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		scopeType := ""
+		scopeValue := ""
+		if rule.Scope != nil {
+			scopeType = rule.Scope.Type
+			scopeValue = rule.Scope.Value
+		}
+		_ = table.Append([]string{
+			truncate(rule.ID, 30),
+			rule.Role,
+			scopeType,
+			truncate(scopeValue, 30),
+		})
+	}
+
+	_ = table.Render()
+	return buf.String()
+}
+
 // RenderAccount renders a single account as a table.
 func (p *TablePresenter) RenderAccount(acct *account.Account) string {
 	if acct == nil {

@@ -45,6 +45,9 @@ func TestCalCmd_UtilsHelp(t *testing.T) {
 	if !containsStr(output, "move") {
 		t.Error("expected output to contain 'move'")
 	}
+	if !containsStr(output, "instances") {
+		t.Error("expected output to contain 'instances'")
+	}
 }
 
 func TestCalQuickAddCmd_Help(t *testing.T) {

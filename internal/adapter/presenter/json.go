@@ -106,6 +106,19 @@ func (p *JSONPresenter) RenderCalendars(cals []*calendar.Calendar) string {
 	return p.marshalJSON(cals)
 }
 
+// RenderACLRule renders a single ACL rule as JSON.
+func (p *JSONPresenter) RenderACLRule(rule *calendar.ACLRule) string {
+	return p.marshalJSON(rule)
+}
+
+// RenderACLRules renders multiple ACL rules as JSON.
+func (p *JSONPresenter) RenderACLRules(rules []*calendar.ACLRule) string {
+	if rules == nil {
+		return "[]"
+	}
+	return p.marshalJSON(rules)
+}
+
 // RenderAccount renders a single account as JSON.
 func (p *JSONPresenter) RenderAccount(acct *account.Account) string {
 	return p.marshalJSON(acct)
