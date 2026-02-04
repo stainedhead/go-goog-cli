@@ -2,11 +2,11 @@
 
 ## Overview
 
-`goog` is a command-line interface for Google Mail and Google Calendar, written in Go. It provides programmatic access to Gmail and Calendar APIs through a clean, scriptable interface designed for both human operators and AI agents.
+`goog` is a command-line interface for Google Mail, Google Calendar, and Google Tasks, written in Go. It provides programmatic access to Gmail, Calendar, and Tasks APIs through a clean, scriptable interface designed for both human operators and AI agents.
 
 ## Goals
 
-- **Unified CLI** - Single tool for Gmail and Calendar operations
+- **Unified CLI** - Single tool for Gmail, Calendar, and Tasks operations
 - **Multi-account support** - Manage separate accounts for different contexts
 - **Scriptability** - JSON output format for easy parsing and automation
 - **Security** - OAuth2/PKCE authentication with tokens stored in system keyring
@@ -30,6 +30,15 @@
 - Availability: free/busy queries
 - RSVP: accept, decline, tentative responses
 
+### Tasks Operations
+- Task list management: list, create, update, delete task lists
+- Task management: list, create, update, delete tasks
+- Task actions: complete, reopen, move tasks
+- Subtasks: parent-child task relationships
+- Due dates: set and filter by due dates
+- Bulk operations: clear completed tasks
+- Filtering: show/hide completed, hidden, and deleted tasks
+
 ### Multi-Account Support
 - Add multiple Google accounts with aliases
 - Switch default account easily
@@ -51,4 +60,5 @@ All planned features implemented:
 - Foundation layer (auth, config, accounts)
 - Gmail core operations
 - Calendar core operations
-- Advanced features (threads, ACL, recurring events)
+- Tasks core operations
+- Advanced features (threads, ACL, recurring events, subtasks)

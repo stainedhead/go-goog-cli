@@ -17,7 +17,7 @@ Dependencies flow inward only. Inner layers define interfaces; outer layers impl
 ### Layer Responsibilities
 
 **Domain** (`internal/domain/`)
-- Pure business entities: `Mail`, `Calendar`, `Account`
+- Pure business entities: `Mail`, `Calendar`, `Tasks`, `Account`
 - Business rules and validation
 - No external dependencies
 
@@ -86,6 +86,13 @@ goog auth login
 | ACL | list, get, insert, delete |
 | FreeBusy | query |
 
+### Tasks API
+
+| Category | Operations |
+|----------|------------|
+| TaskLists | list, get, insert, update, delete |
+| Tasks | list, get, insert, update, delete, move, clear |
+
 ## Configuration
 
 Config file location: `~/.config/goog/config.yaml`
@@ -140,6 +147,13 @@ Keyring entries per account:
 | `calendar` | Full calendar access |
 | `calendar.events` | Events only |
 
+### Tasks Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `tasks.readonly` | Read-only tasks access |
+| `tasks` | Full tasks access |
+
 ## Error Handling
 
 Errors are wrapped with context using `fmt.Errorf("context: %w", err)`:
@@ -172,15 +186,16 @@ go test -v ./internal/adapter/cli  # Specific package
 | **domain/account** | 100% | 15 | ✅ Perfect |
 | **domain/calendar** | 100% | 45 | ✅ Perfect |
 | **domain/mail** | 100% | 38 | ✅ Perfect |
+| **domain/tasks** | 100% | 14 | ✅ Perfect |
 | **infrastructure/auth** | 93.3% | 25 | ✅ Excellent |
 | **infrastructure/keyring** | 91.3% | 18 | ✅ Excellent |
 | **infrastructure/config** | 80.1% | 12 | ✅ Good |
 | **adapter/presenter** | 93.7% | 42 | ✅ Excellent |
-| **adapter/repository** | 90.9% | 58 | ✅ Excellent |
-| **adapter/cli** | 83.8% | 114+ | ✅ Very Good |
+| **adapter/repository** | 84.1% | 73 | ✅ Excellent |
+| **adapter/cli** | 83.5% | 174+ | ✅ Very Good |
 | **usecase/account** | 90.6% | 20 | ✅ Excellent |
 
-**Overall Project:** 76.3% coverage | 367+ total tests
+**Overall Project:** 80.6% coverage | 436+ total tests
 
 ### Test Infrastructure
 
@@ -211,13 +226,14 @@ go test -v ./internal/adapter/cli  # Specific package
 │   ├── domain/
 │   │   ├── account/               # Account entity
 │   │   ├── mail/                  # Message, Draft, Label, Thread
-│   │   └── calendar/              # Event, Calendar, ACL, FreeBusy
+│   │   ├── calendar/              # Event, Calendar, ACL, FreeBusy
+│   │   └── tasks/                 # Task, TaskList
 │   ├── usecase/
 │   │   └── account/               # Account service, OAuth flow
 │   ├── adapter/
 │   │   ├── cli/                   # Command handlers
 │   │   ├── presenter/             # JSON, Table, Plain formatters
-│   │   └── repository/            # Gmail, Calendar repositories
+│   │   └── repository/            # Gmail, Calendar, Tasks repositories
 │   └── infrastructure/
 │       ├── auth/                  # OAuth2/PKCE, token management
 │       ├── config/                # Viper configuration

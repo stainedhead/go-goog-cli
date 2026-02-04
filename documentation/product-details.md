@@ -15,7 +15,7 @@ goog auth refresh                  # Force token refresh
 goog auth logout                   # Remove credentials
 ```
 
-Scope shorthand supported: `gmail`, `gmail.modify`, `calendar`, `calendar.full`, etc.
+Scope shorthand supported: `gmail`, `gmail.modify`, `calendar`, `calendar.full`, `tasks`, `tasks.readonly`, etc.
 
 ### Multi-Account Management
 
@@ -160,6 +160,55 @@ goog cal unshare primary "user:user@ex.com" --confirm
 
 Roles: `reader`, `writer`, `owner`, `freeBusyReader`
 
+### Tasks - Task Lists
+
+```bash
+goog tasks lists                       # List all task lists
+goog tasks create-list "Work Tasks"    # Create new list
+goog tasks update-list <id> --title "New Name"
+goog tasks delete-list <id> --confirm  # Delete list
+```
+
+### Tasks - Tasks
+
+List and view:
+```bash
+goog tasks list                        # List tasks in default list
+goog tasks list --list <list-id>       # Tasks from specific list
+goog tasks list --show-completed       # Include completed
+goog tasks list --max-results 50       # Limit results
+goog tasks get <id>                    # Task details
+```
+
+Create and update:
+```bash
+goog tasks create "Buy groceries"
+goog tasks create "Submit report" --due "2024-12-31" --notes "Q4 report"
+goog tasks create "Review slides" --parent <parent-id>    # Create subtask
+goog tasks update <id> --title "New title"
+goog tasks update <id> --notes "Updated notes" --due "2024-12-31"
+```
+
+Actions:
+```bash
+goog tasks complete <id>               # Mark as completed
+goog tasks reopen <id>                 # Reopen completed task
+goog tasks move <id> --parent <parent-id>      # Move under parent
+goog tasks move <id> --previous <previous-id>  # Reorder tasks
+goog tasks delete <id> --confirm       # Delete task
+goog tasks clear --confirm             # Clear completed tasks
+```
+
+Task Lists:
+- Default list ID: `@default`
+- Each account can have multiple task lists
+- Tasks belong to one list
+
+Subtasks:
+- Tasks can have one level of subtasks (parent-child only)
+- Use `--parent` flag when creating to make a subtask
+- Maximum 2000 subtasks per parent task
+
 ## Output Formats
 
 | Format | Flag | Use Case |
@@ -184,8 +233,17 @@ goog cal freebusy --start "..." --end "..."   # Check availability
 goog cal create --title "Meeting" --start "..." --attendees ...
 ```
 
+### Task Management
+```bash
+goog tasks list                        # Check today's tasks
+goog tasks create "New task" --due "2024-12-31"
+goog tasks complete abc123             # Mark done
+goog tasks clear --confirm             # Clean up completed
+```
+
 ### Automated Notifications (AI Agent)
 ```bash
 goog mail search "from:alerts@system.com" --format json | jq ...
 goog cal today --format json | jq ...
+goog tasks list --format json | jq ...
 ```
