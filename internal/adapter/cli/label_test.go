@@ -1025,3 +1025,720 @@ func TestRunLabelList_JSONFormat(t *testing.T) {
 		t.Errorf("expected JSON output to contain label name, got: %s", output)
 	}
 }
+
+func TestRunLabelShow_JSONFormat(t *testing.T) {
+	mockLabel := &mail.Label{
+		ID:   "label123",
+		Name: "Work",
+		Type: mail.LabelTypeUser,
+	}
+
+	mockRepo := &MockLabelRepository{
+		Label: mockLabel,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "json"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelShow(cmd, []string{"Work"})
+	if err != nil {
+		t.Fatalf("runLabelShow failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Work") {
+		t.Errorf("expected JSON output to contain label name, got: %s", output)
+	}
+}
+
+func TestRunLabelCreate_JSONFormat(t *testing.T) {
+	mockRepo := &MockLabelRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origBg := labelBackgroundColor
+	origText := labelTextColor
+	formatFlag = "json"
+	labelBackgroundColor = ""
+	labelTextColor = ""
+	defer func() {
+		formatFlag = origFormat
+		labelBackgroundColor = origBg
+		labelTextColor = origText
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelCreate(cmd, []string{"NewLabel"})
+	if err != nil {
+		t.Fatalf("runLabelCreate failed: %v", err)
+	}
+
+	output := buf.String()
+	// JSON output should contain label data
+	if len(output) == 0 {
+		t.Error("expected non-empty JSON output")
+	}
+}
+
+func TestRunLabelUpdate_JSONFormat(t *testing.T) {
+	mockLabel := &mail.Label{
+		ID:   "label123",
+		Name: "Work",
+		Type: mail.LabelTypeUser,
+	}
+
+	mockRepo := &MockLabelRepository{
+		Label: mockLabel,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origBg := labelBackgroundColor
+	formatFlag = "json"
+	labelBackgroundColor = "#0000ff"
+	defer func() {
+		formatFlag = origFormat
+		labelBackgroundColor = origBg
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelUpdate(cmd, []string{"Work"})
+	if err != nil {
+		t.Fatalf("runLabelUpdate failed: %v", err)
+	}
+
+	output := buf.String()
+	if len(output) == 0 {
+		t.Error("expected non-empty JSON output")
+	}
+}
+
+func TestRunLabelUpdate_UpdateError(t *testing.T) {
+	mockLabel := &mail.Label{
+		ID:   "label123",
+		Name: "Work",
+		Type: mail.LabelTypeUser,
+	}
+
+	mockRepo := &MockLabelRepository{
+		Label:     mockLabel,
+		UpdateErr: fmt.Errorf("update failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origBg := labelBackgroundColor
+	labelBackgroundColor = "#ff0000"
+	defer func() { labelBackgroundColor = origBg }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelUpdate(cmd, []string{"Work"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to update label") {
+		t.Errorf("expected error to contain 'failed to update label', got: %v", err)
+	}
+}
+
+func TestRunLabelUpdate_NotFound(t *testing.T) {
+	mockRepo := &MockLabelRepository{
+		GetByNameErr: fmt.Errorf("not found"),
+		GetErr:       fmt.Errorf("not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origBg := labelBackgroundColor
+	labelBackgroundColor = "#ff0000"
+	defer func() { labelBackgroundColor = origBg }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelUpdate(cmd, []string{"NonExistent"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "label not found") {
+		t.Errorf("expected error to contain 'label not found', got: %v", err)
+	}
+}
+
+func TestRunLabelDelete_NotFound(t *testing.T) {
+	mockRepo := &MockLabelRepository{
+		GetByNameErr: fmt.Errorf("not found"),
+		GetErr:       fmt.Errorf("not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelDelete(cmd, []string{"NonExistent"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "label not found") {
+		t.Errorf("expected error to contain 'label not found', got: %v", err)
+	}
+}
+
+func TestRunLabelDelete_DeleteError(t *testing.T) {
+	mockLabel := &mail.Label{
+		ID:   "label123",
+		Name: "Work",
+		Type: mail.LabelTypeUser,
+	}
+
+	mockRepo := &MockLabelRepository{
+		Label:     mockLabel,
+		DeleteErr: fmt.Errorf("delete failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelDelete(cmd, []string{"Work"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to delete label") {
+		t.Errorf("expected error to contain 'failed to delete label', got: %v", err)
+	}
+}
+
+func TestRunLabelCreate_WithPartialColors(t *testing.T) {
+	mockRepo := &MockLabelRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	t.Run("background only", func(t *testing.T) {
+		origFormat := formatFlag
+		origBg := labelBackgroundColor
+		origText := labelTextColor
+		formatFlag = "plain"
+		labelBackgroundColor = "#ff0000"
+		labelTextColor = ""
+		defer func() {
+			formatFlag = origFormat
+			labelBackgroundColor = origBg
+			labelTextColor = origText
+		}()
+
+		cmd := &cobra.Command{Use: "test"}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		err := runLabelCreate(cmd, []string{"TestLabel"})
+		if err != nil {
+			t.Fatalf("runLabelCreate failed: %v", err)
+		}
+
+		output := buf.String()
+		if !contains(output, "Label created successfully") {
+			t.Errorf("expected success message, got: %s", output)
+		}
+	})
+
+	t.Run("text only", func(t *testing.T) {
+		origFormat := formatFlag
+		origBg := labelBackgroundColor
+		origText := labelTextColor
+		formatFlag = "plain"
+		labelBackgroundColor = ""
+		labelTextColor = "#ffffff"
+		defer func() {
+			formatFlag = origFormat
+			labelBackgroundColor = origBg
+			labelTextColor = origText
+		}()
+
+		cmd := &cobra.Command{Use: "test"}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+
+		err := runLabelCreate(cmd, []string{"TestLabel2"})
+		if err != nil {
+			t.Fatalf("runLabelCreate failed: %v", err)
+		}
+
+		output := buf.String()
+		if !contains(output, "Label created successfully") {
+			t.Errorf("expected success message, got: %s", output)
+		}
+	})
+}
+
+func TestRunLabelUpdate_WithColorPreservation(t *testing.T) {
+	mockLabel := &mail.Label{
+		ID:    "label123",
+		Name:  "Work",
+		Type:  mail.LabelTypeUser,
+		Color: &mail.LabelColor{Background: "#0000ff", Text: "#ffffff"},
+	}
+
+	mockRepo := &MockLabelRepository{
+		Label: mockLabel,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origBg := labelBackgroundColor
+	origText := labelTextColor
+	formatFlag = "plain"
+	labelBackgroundColor = "#ff0000"
+	labelTextColor = ""
+	defer func() {
+		formatFlag = origFormat
+		labelBackgroundColor = origBg
+		labelTextColor = origText
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelUpdate(cmd, []string{"Work"})
+	if err != nil {
+		t.Fatalf("runLabelUpdate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Label updated successfully") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+}
+
+func TestRunLabelShow_ByID(t *testing.T) {
+	mockLabel := &mail.Label{
+		ID:   "label123",
+		Name: "Work",
+		Type: mail.LabelTypeUser,
+	}
+
+	mockRepo := &MockLabelRepository{
+		GetByNameErr: fmt.Errorf("not found by name"),
+		Label:        mockLabel,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "plain"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelShow(cmd, []string{"label123"})
+	if err != nil {
+		t.Fatalf("runLabelShow failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Work") {
+		t.Errorf("expected output to contain label name, got: %s", output)
+	}
+}
+
+func TestRunLabelDelete_ByID(t *testing.T) {
+	mockLabel := &mail.Label{
+		ID:   "label123",
+		Name: "Work",
+		Type: mail.LabelTypeUser,
+	}
+
+	mockRepo := &MockLabelRepository{
+		GetByNameErr: fmt.Errorf("not found by name"),
+		Label:        mockLabel,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = false
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelDelete(cmd, []string{"label123"})
+	if err != nil {
+		t.Fatalf("runLabelDelete failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "deleted") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunLabelUpdate_ByID(t *testing.T) {
+	mockLabel := &mail.Label{
+		ID:   "label123",
+		Name: "Work",
+		Type: mail.LabelTypeUser,
+	}
+
+	mockRepo := &MockLabelRepository{
+		GetByNameErr: fmt.Errorf("not found by name"),
+		Label:        mockLabel,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origBg := labelBackgroundColor
+	formatFlag = "plain"
+	labelBackgroundColor = "#0000ff"
+	defer func() {
+		formatFlag = origFormat
+		labelBackgroundColor = origBg
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelUpdate(cmd, []string{"label123"})
+	if err != nil {
+		t.Fatalf("runLabelUpdate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Label updated successfully") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+}
+
+func TestRunLabelList_RepositoryError(t *testing.T) {
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelErr: fmt.Errorf("failed to create repository"),
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelList(cmd, []string{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestRunLabelShow_RepositoryError(t *testing.T) {
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelErr: fmt.Errorf("failed to create repository"),
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelShow(cmd, []string{"Work"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestRunLabelCreate_RepositoryError(t *testing.T) {
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelErr: fmt.Errorf("failed to create repository"),
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelCreate(cmd, []string{"NewLabel"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestRunLabelUpdate_RepositoryError(t *testing.T) {
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelErr: fmt.Errorf("failed to create repository"),
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelUpdate(cmd, []string{"Work"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestRunLabelDelete_RepositoryError(t *testing.T) {
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelErr: fmt.Errorf("failed to create repository"),
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelDelete(cmd, []string{"Work"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestRunLabelUpdate_WithNoColorAndTextOnly(t *testing.T) {
+	mockLabel := &mail.Label{
+		ID:    "label123",
+		Name:  "Work",
+		Type:  mail.LabelTypeUser,
+		Color: nil,
+	}
+
+	mockRepo := &MockLabelRepository{
+		Label: mockLabel,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			LabelRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origBg := labelBackgroundColor
+	origText := labelTextColor
+	formatFlag = "plain"
+	labelBackgroundColor = ""
+	labelTextColor = "#ffffff"
+	defer func() {
+		formatFlag = origFormat
+		labelBackgroundColor = origBg
+		labelTextColor = origText
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runLabelUpdate(cmd, []string{"Work"})
+	if err != nil {
+		t.Fatalf("runLabelUpdate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Label updated successfully") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+}

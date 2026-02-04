@@ -993,3 +993,488 @@ func TestCalDeleteCmd_ArgsValidation(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// Edge Case and Error Path Tests for Calendar Events
+// =============================================================================
+
+func TestParseDateTime_InvalidFormats(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "invalid date format",
+			input: "15-01-2024",
+		},
+		{
+			name:  "time without date",
+			input: "14:30",
+		},
+		{
+			name:  "random text",
+			input: "not a valid date",
+		},
+		{
+			name:  "partial ISO date",
+			input: "2024-01",
+		},
+		{
+			name:  "invalid month",
+			input: "2024-13-01",
+		},
+		{
+			name:  "invalid day",
+			input: "2024-01-32",
+		},
+		{
+			name:  "whitespace only",
+			input: "   ",
+		},
+		{
+			name:  "tomorrow with extra words",
+			input: "tomorrow at the meeting",
+		},
+		{
+			name:  "today with invalid time format",
+			input: "today 25:00",
+		},
+		{
+			name:  "yesterday keyword (not supported)",
+			input: "yesterday",
+		},
+		{
+			name:  "next week (not supported)",
+			input: "next week",
+		},
+		{
+			name:  "date with slash separators",
+			input: "01/15/2024",
+		},
+		{
+			name:  "european date format",
+			input: "15.01.2024",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseDateTime(tt.input)
+			if err == nil {
+				t.Errorf("expected error for invalid input %q, got nil", tt.input)
+			}
+		})
+	}
+}
+
+func TestParseDateTime_ValidEdgeCases(t *testing.T) {
+	loc := time.Local
+
+	tests := []struct {
+		name        string
+		input       string
+		checkResult func(t *testing.T, result time.Time)
+	}{
+		{
+			name:  "midnight",
+			input: "2024-01-15 00:00",
+			checkResult: func(t *testing.T, result time.Time) {
+				expected := time.Date(2024, 1, 15, 0, 0, 0, 0, loc)
+				if !result.Equal(expected) {
+					t.Errorf("expected %v, got %v", expected, result)
+				}
+			},
+		},
+		{
+			name:  "end of day",
+			input: "2024-01-15 23:59:59",
+			checkResult: func(t *testing.T, result time.Time) {
+				expected := time.Date(2024, 1, 15, 23, 59, 59, 0, loc)
+				if !result.Equal(expected) {
+					t.Errorf("expected %v, got %v", expected, result)
+				}
+			},
+		},
+		{
+			name:  "leap year date",
+			input: "2024-02-29",
+			checkResult: func(t *testing.T, result time.Time) {
+				if result.Month() != time.February || result.Day() != 29 {
+					t.Errorf("expected Feb 29, got %v", result)
+				}
+			},
+		},
+		{
+			name:  "new year",
+			input: "2024-01-01 00:00",
+			checkResult: func(t *testing.T, result time.Time) {
+				if result.Month() != time.January || result.Day() != 1 {
+					t.Errorf("expected Jan 1, got %v", result)
+				}
+			},
+		},
+		{
+			name:  "year end",
+			input: "2024-12-31 23:59",
+			checkResult: func(t *testing.T, result time.Time) {
+				if result.Month() != time.December || result.Day() != 31 {
+					t.Errorf("expected Dec 31, got %v", result)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseDateTime(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.checkResult != nil {
+				tt.checkResult(t, result)
+			}
+		})
+	}
+}
+
+func TestParseTimeOfDay_InvalidInputs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "negative hour",
+			input: "-5:00",
+		},
+		{
+			name:  "hour > 23",
+			input: "25:00",
+		},
+		{
+			name:  "minute > 59",
+			input: "10:60",
+		},
+		{
+			name:  "negative minute",
+			input: "10:-30",
+		},
+		{
+			name:  "13pm (invalid)",
+			input: "13pm",
+		},
+		{
+			name:  "single digit without am/pm",
+			input: "3",
+		},
+		{
+			name:  "no colon in 24h format",
+			input: "1400",
+		},
+		{
+			name:  "am/pm without hour",
+			input: "am",
+		},
+		{
+			name:  "special characters",
+			input: "@#$%",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := parseTimeOfDay(tt.input)
+			if err == nil {
+				t.Errorf("expected error for invalid input %q, got nil", tt.input)
+			}
+		})
+	}
+}
+
+func TestParseTimeOfDay_ValidBoundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		expectH int
+		expectM int
+	}{
+		{
+			name:    "1am (boundary)",
+			input:   "1am",
+			expectH: 1,
+			expectM: 0,
+		},
+		{
+			name:    "12:01am (just past midnight)",
+			input:   "12:01am",
+			expectH: 0,
+			expectM: 1,
+		},
+		{
+			name:    "11:59am (just before noon)",
+			input:   "11:59am",
+			expectH: 11,
+			expectM: 59,
+		},
+		{
+			name:    "12:01pm (just past noon)",
+			input:   "12:01pm",
+			expectH: 12,
+			expectM: 1,
+		},
+		{
+			name:    "11:59pm (just before midnight)",
+			input:   "11:59pm",
+			expectH: 23,
+			expectM: 59,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, m, err := parseTimeOfDay(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if h != tt.expectH || m != tt.expectM {
+				t.Errorf("expected %02d:%02d, got %02d:%02d", tt.expectH, tt.expectM, h, m)
+			}
+		})
+	}
+}
+
+func TestParseAttendees_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []string
+		expected  int
+		expectErr bool
+	}{
+		{
+			name:     "very long email list",
+			input:    []string{"a1@b.com", "a2@b.com", "a3@b.com", "a4@b.com", "a5@b.com", "a6@b.com", "a7@b.com", "a8@b.com", "a9@b.com", "a10@b.com"},
+			expected: 10,
+		},
+		{
+			name:     "duplicate emails",
+			input:    []string{"user@example.com", "user@example.com"},
+			expected: 2, // parseAttendees doesn't deduplicate
+		},
+		{
+			name:     "mixed case emails",
+			input:    []string{"User@Example.Com", "test@TEST.COM"},
+			expected: 2,
+		},
+		{
+			name:      "email with invalid TLD",
+			input:     []string{"user@example.c"},
+			expectErr: true, // Short TLD, depends on validation
+		},
+		{
+			name:     "email with numbers only in domain",
+			input:    []string{"user@123.com"},
+			expected: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseAttendees(tt.input)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(result) != tt.expected {
+					t.Errorf("expected %d attendees, got %d", tt.expected, len(result))
+				}
+			}
+		})
+	}
+}
+
+func TestParseRelativeDate_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		daysOffset  int
+		expectErr   bool
+		checkResult func(t *testing.T, result time.Time)
+	}{
+		{
+			name:       "tomorrow with 12am",
+			input:      "tomorrow 12am",
+			daysOffset: 1,
+			checkResult: func(t *testing.T, result time.Time) {
+				if result.Hour() != 0 {
+					t.Errorf("expected hour 0, got %d", result.Hour())
+				}
+			},
+		},
+		{
+			name:       "today with 12pm",
+			input:      "today 12pm",
+			daysOffset: 0,
+			checkResult: func(t *testing.T, result time.Time) {
+				if result.Hour() != 12 {
+					t.Errorf("expected hour 12, got %d", result.Hour())
+				}
+			},
+		},
+		{
+			name:       "tomorrow with 11:59pm",
+			input:      "tomorrow 11:59pm",
+			daysOffset: 1,
+			checkResult: func(t *testing.T, result time.Time) {
+				if result.Hour() != 23 || result.Minute() != 59 {
+					t.Errorf("expected 23:59, got %02d:%02d", result.Hour(), result.Minute())
+				}
+			},
+		},
+		{
+			name:       "today with 1:30am",
+			input:      "today 1:30am",
+			daysOffset: 0,
+			checkResult: func(t *testing.T, result time.Time) {
+				if result.Hour() != 1 || result.Minute() != 30 {
+					t.Errorf("expected 01:30, got %02d:%02d", result.Hour(), result.Minute())
+				}
+			},
+		},
+		{
+			name:       "tomorrow only (no time)",
+			input:      "tomorrow",
+			daysOffset: 1,
+			checkResult: func(t *testing.T, result time.Time) {
+				if result.Hour() != 0 || result.Minute() != 0 {
+					t.Errorf("expected 00:00, got %02d:%02d", result.Hour(), result.Minute())
+				}
+			},
+		},
+		{
+			name:       "today only (no time)",
+			input:      "today",
+			daysOffset: 0,
+			checkResult: func(t *testing.T, result time.Time) {
+				if result.Hour() != 0 || result.Minute() != 0 {
+					t.Errorf("expected 00:00, got %02d:%02d", result.Hour(), result.Minute())
+				}
+			},
+		},
+		{
+			name:       "tomorrow with invalid time",
+			input:      "tomorrow 25:00",
+			daysOffset: 1,
+			expectErr:  true,
+		},
+		{
+			name:       "today with text instead of time",
+			input:      "today afternoon",
+			daysOffset: 0,
+			expectErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseRelativeDate(tt.input, tt.daysOffset)
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("expected error for input %q", tt.input)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if tt.checkResult != nil {
+					tt.checkResult(t, result)
+				}
+			}
+		})
+	}
+}
+
+func TestCalCreateCmd_AllFlagCombinations(t *testing.T) {
+	tests := []struct {
+		name      string
+		title     string
+		start     string
+		expectErr bool
+	}{
+		{
+			name:      "both present with whitespace",
+			title:     "  Meeting  ",
+			start:     "  2024-01-15 14:00  ",
+			expectErr: false,
+		},
+		{
+			name:      "title with special characters",
+			title:     "Meeting: [URGENT] #123!",
+			start:     "2024-01-15 14:00",
+			expectErr: false,
+		},
+		{
+			name:      "very long title",
+			title:     "This is a very long meeting title that goes on and on and on and on and on and should still be accepted",
+			start:     "2024-01-15 14:00",
+			expectErr: false,
+		},
+		{
+			name:      "unicode in title",
+			title:     "会議 - Meeting",
+			start:     "2024-01-15 14:00",
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origTitle := calCreateTitle
+			origStart := calCreateStart
+
+			calCreateTitle = tt.title
+			calCreateStart = tt.start
+
+			mockCmd := &cobra.Command{Use: "test"}
+			err := calCreateCmd.PreRunE(mockCmd, []string{})
+
+			calCreateTitle = origTitle
+			calCreateStart = origStart
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalDeleteCmd_WithoutConfirm(t *testing.T) {
+	// Test that error message is printed to stderr
+	origConfirm := calDeleteConfirm
+	calDeleteConfirm = false
+
+	mockCmd := &cobra.Command{Use: "test"}
+	errBuf := new(bytes.Buffer)
+	mockCmd.SetErr(errBuf)
+
+	err := calDeleteCmd.PreRunE(mockCmd, []string{"event123"})
+
+	calDeleteConfirm = origConfirm
+
+	if err == nil {
+		t.Error("expected error without --confirm flag")
+	}
+
+	errOutput := errBuf.String()
+	if !contains(errOutput, "deletion requires --confirm") {
+		t.Errorf("expected error message about --confirm, got: %s", errOutput)
+	}
+}

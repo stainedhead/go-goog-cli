@@ -304,3 +304,24 @@ func TestConfigGetCmd_ArgsValidation(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// Tests for RunE functions - these test the actual command execution
+// =============================================================================
+
+func TestRunConfigPath(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runConfigPath(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runConfigPath failed: %v", err)
+	}
+
+	output := buf.String()
+	// Should output a path
+	if len(output) == 0 {
+		t.Error("expected non-empty output")
+	}
+}

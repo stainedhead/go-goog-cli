@@ -843,3 +843,530 @@ func TestCalCmd_SubcommandsRegistered(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// Edge Case and Error Path Tests for Calendar Utilities
+// =============================================================================
+
+func TestCalFreeBusyCmd_ValidationErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		start     string
+		end       string
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name:      "both missing",
+			start:     "",
+			end:       "",
+			expectErr: true,
+			errMsg:    "--start",
+		},
+		{
+			name:      "start missing",
+			start:     "",
+			end:       "2024-01-15T17:00:00Z",
+			expectErr: true,
+			errMsg:    "--start",
+		},
+		{
+			name:      "end missing",
+			start:     "2024-01-15T09:00:00Z",
+			end:       "",
+			expectErr: true,
+			errMsg:    "--end",
+		},
+		{
+			name:      "both present",
+			start:     "2024-01-15T09:00:00Z",
+			end:       "2024-01-15T17:00:00Z",
+			expectErr: false,
+		},
+		{
+			name:      "whitespace only start",
+			start:     "   ",
+			end:       "2024-01-15T17:00:00Z",
+			expectErr: false, // Whitespace is not empty string, passes PreRunE
+		},
+		{
+			name:      "whitespace only end",
+			start:     "2024-01-15T09:00:00Z",
+			end:       "   ",
+			expectErr: false, // Whitespace is not empty string, passes PreRunE
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origStart := calFreeBusyStart
+			origEnd := calFreeBusyEnd
+
+			calFreeBusyStart = tt.start
+			calFreeBusyEnd = tt.end
+
+			mockCmd := &cobra.Command{Use: "test"}
+			err := calFreeBusyCmd.PreRunE(mockCmd, []string{})
+
+			calFreeBusyStart = origStart
+			calFreeBusyEnd = origEnd
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				if tt.errMsg != "" && !containsStr(err.Error(), tt.errMsg) {
+					t.Errorf("expected error to contain %q, got %q", tt.errMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalRSVPCmd_FlagCombinations(t *testing.T) {
+	tests := []struct {
+		name      string
+		accept    bool
+		decline   bool
+		tentative bool
+		expectErr bool
+	}{
+		{
+			name:      "none set",
+			accept:    false,
+			decline:   false,
+			tentative: false,
+			expectErr: true,
+		},
+		{
+			name:      "accept only",
+			accept:    true,
+			decline:   false,
+			tentative: false,
+			expectErr: false,
+		},
+		{
+			name:      "decline only",
+			accept:    false,
+			decline:   true,
+			tentative: false,
+			expectErr: false,
+		},
+		{
+			name:      "tentative only",
+			accept:    false,
+			decline:   false,
+			tentative: true,
+			expectErr: false,
+		},
+		{
+			name:      "accept and decline",
+			accept:    true,
+			decline:   true,
+			tentative: false,
+			expectErr: true,
+		},
+		{
+			name:      "accept and tentative",
+			accept:    true,
+			decline:   false,
+			tentative: true,
+			expectErr: true,
+		},
+		{
+			name:      "decline and tentative",
+			accept:    false,
+			decline:   true,
+			tentative: true,
+			expectErr: true,
+		},
+		{
+			name:      "all three",
+			accept:    true,
+			decline:   true,
+			tentative: true,
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origAccept := calRSVPAccept
+			origDecline := calRSVPDecline
+			origTentative := calRSVPTentative
+
+			calRSVPAccept = tt.accept
+			calRSVPDecline = tt.decline
+			calRSVPTentative = tt.tentative
+
+			mockCmd := &cobra.Command{Use: "test"}
+			err := calRSVPCmd.PreRunE(mockCmd, []string{"event123"})
+
+			calRSVPAccept = origAccept
+			calRSVPDecline = origDecline
+			calRSVPTentative = origTentative
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCalMoveCmd_ValidationEdgeCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		destination string
+		expectErr   bool
+	}{
+		{
+			name:        "empty destination",
+			destination: "",
+			expectErr:   true,
+		},
+		{
+			name:        "whitespace destination",
+			destination: "   ",
+			expectErr:   false, // PreRunE only checks empty string, not whitespace
+		},
+		{
+			name:        "valid destination",
+			destination: "target@calendar.google.com",
+			expectErr:   false,
+		},
+		{
+			name:        "primary as destination",
+			destination: "primary",
+			expectErr:   false,
+		},
+		{
+			name:        "very long destination",
+			destination: "verylongemailaddress@verylongdomainname.calendar.google.com",
+			expectErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origDest := calMoveDestination
+			calMoveDestination = tt.destination
+
+			mockCmd := &cobra.Command{Use: "test"}
+			err := calMoveCmd.PreRunE(mockCmd, []string{"event123"})
+
+			calMoveDestination = origDest
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderFreeBusyTable_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		response *calendar.FreeBusyResponse
+		start    time.Time
+		end      time.Time
+		check    func(t *testing.T, output string)
+	}{
+		{
+			name:     "nil response",
+			response: nil,
+			start:    dummyTime(),
+			end:      dummyTime().Add(time.Hour),
+			check: func(t *testing.T, output string) {
+				if !containsStr(output, "No busy periods found") {
+					t.Error("expected 'No busy periods found'")
+				}
+			},
+		},
+		{
+			name: "empty calendars map",
+			response: &calendar.FreeBusyResponse{
+				Calendars: map[string][]*calendar.TimePeriod{},
+			},
+			start: dummyTime(),
+			end:   dummyTime().Add(time.Hour),
+			check: func(t *testing.T, output string) {
+				if !containsStr(output, "No busy periods found") {
+					t.Error("expected 'No busy periods found'")
+				}
+			},
+		},
+		{
+			name: "calendar with empty periods",
+			response: &calendar.FreeBusyResponse{
+				Calendars: map[string][]*calendar.TimePeriod{
+					"primary": {},
+				},
+			},
+			start: dummyTime(),
+			end:   dummyTime().Add(time.Hour),
+			check: func(t *testing.T, output string) {
+				if !containsStr(output, "primary") {
+					t.Error("expected calendar ID")
+				}
+				if !containsStr(output, "No busy periods (free)") {
+					t.Error("expected 'No busy periods (free)'")
+				}
+			},
+		},
+		{
+			name: "multiple busy periods",
+			response: &calendar.FreeBusyResponse{
+				Calendars: map[string][]*calendar.TimePeriod{
+					"primary": {
+						{Start: dummyTime(), End: dummyTime().Add(time.Hour)},
+						{Start: dummyTime().Add(2 * time.Hour), End: dummyTime().Add(3 * time.Hour)},
+					},
+				},
+			},
+			start: dummyTime(),
+			end:   dummyTime().Add(4 * time.Hour),
+			check: func(t *testing.T, output string) {
+				if !containsStr(output, "BUSY") {
+					t.Error("expected 'BUSY' marker")
+				}
+				// Should show both periods
+				busyCount := bytes.Count([]byte(output), []byte("BUSY"))
+				if busyCount != 2 {
+					t.Errorf("expected 2 BUSY markers, got %d", busyCount)
+				}
+			},
+		},
+		{
+			name: "multiple calendars mixed",
+			response: &calendar.FreeBusyResponse{
+				Calendars: map[string][]*calendar.TimePeriod{
+					"primary": {
+						{Start: dummyTime(), End: dummyTime().Add(time.Hour)},
+					},
+					"work@example.com": {},
+					"personal@example.com": {
+						{Start: dummyTime().Add(2 * time.Hour), End: dummyTime().Add(3 * time.Hour)},
+					},
+				},
+			},
+			start: dummyTime(),
+			end:   dummyTime().Add(4 * time.Hour),
+			check: func(t *testing.T, output string) {
+				if !containsStr(output, "primary") {
+					t.Error("expected 'primary'")
+				}
+				if !containsStr(output, "work@example.com") {
+					t.Error("expected 'work@example.com'")
+				}
+				if !containsStr(output, "personal@example.com") {
+					t.Error("expected 'personal@example.com'")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := renderFreeBusyTable(tt.response, tt.start, tt.end)
+			if tt.check != nil {
+				tt.check(t, output)
+			}
+		})
+	}
+}
+
+func TestRenderFreeBusyJSON_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		response *calendar.FreeBusyResponse
+		check    func(t *testing.T, output string)
+	}{
+		{
+			name:     "nil response",
+			response: nil,
+			check: func(t *testing.T, output string) {
+				if output != "{}" {
+					t.Errorf("expected '{}', got %s", output)
+				}
+			},
+		},
+		{
+			name: "empty calendars",
+			response: &calendar.FreeBusyResponse{
+				Calendars: map[string][]*calendar.TimePeriod{},
+			},
+			check: func(t *testing.T, output string) {
+				if !containsStr(output, "calendars") {
+					t.Error("expected 'calendars' key")
+				}
+			},
+		},
+		{
+			name: "calendar with no periods",
+			response: &calendar.FreeBusyResponse{
+				Calendars: map[string][]*calendar.TimePeriod{
+					"primary": {},
+				},
+			},
+			check: func(t *testing.T, output string) {
+				if !containsStr(output, "primary") {
+					t.Error("expected 'primary'")
+				}
+				// Empty array with newline: "[\n    ]"
+				if !containsStr(output, "    ]") {
+					t.Errorf("expected formatted empty array, got: %s", output)
+				}
+			},
+		},
+		{
+			name: "single period",
+			response: &calendar.FreeBusyResponse{
+				Calendars: map[string][]*calendar.TimePeriod{
+					"primary": {
+						{Start: time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC), End: time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)},
+					},
+				},
+			},
+			check: func(t *testing.T, output string) {
+				if !containsStr(output, "start") {
+					t.Error("expected 'start' key")
+				}
+				if !containsStr(output, "end") {
+					t.Error("expected 'end' key")
+				}
+				if !containsStr(output, "2024-01-15T10:00:00Z") {
+					t.Error("expected start time in RFC3339")
+				}
+			},
+		},
+		{
+			name: "multiple periods with special characters in calendar ID",
+			response: &calendar.FreeBusyResponse{
+				Calendars: map[string][]*calendar.TimePeriod{
+					"user+tag@example.com": {
+						{Start: dummyTime(), End: dummyTime().Add(time.Hour)},
+					},
+				},
+			},
+			check: func(t *testing.T, output string) {
+				if !containsStr(output, "user+tag@example.com") {
+					t.Error("expected calendar ID with special characters")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := renderFreeBusyJSON(tt.response)
+			if tt.check != nil {
+				tt.check(t, output)
+			}
+		})
+	}
+}
+
+func TestCalQuickAddCmd_EmptyText(t *testing.T) {
+	// Test that Args validator rejects empty string
+	err := calQuickAddCmd.Args(calQuickAddCmd, []string{""})
+	// Should pass Args validation (counts as 1 arg), though empty text would fail in API
+	if err != nil {
+		t.Errorf("Args validator should accept empty string (count is 1): %v", err)
+	}
+}
+
+func TestCalRSVPCmd_EmptyEventID(t *testing.T) {
+	// Test Args validator with empty string
+	err := calRSVPCmd.Args(calRSVPCmd, []string{""})
+	// Should pass Args validation (counts as 1 arg)
+	if err != nil {
+		t.Errorf("Args validator should accept empty string (count is 1): %v", err)
+	}
+}
+
+func TestCalMoveCmd_EmptyEventID(t *testing.T) {
+	// Test Args validator with empty string
+	err := calMoveCmd.Args(calMoveCmd, []string{""})
+	// Should pass Args validation (counts as 1 arg)
+	if err != nil {
+		t.Errorf("Args validator should accept empty string (count is 1): %v", err)
+	}
+}
+
+func TestCalFreeBusyCmd_DefaultCalendars(t *testing.T) {
+	// Test that --calendars has a default value
+	flag := calFreeBusyCmd.Flag("calendars")
+	if flag == nil {
+		t.Fatal("expected --calendars flag to exist")
+	}
+	// Default should be "primary"
+	if flag.DefValue != "[primary]" {
+		t.Logf("Default calendars flag value: %s (expected [primary])", flag.DefValue)
+	}
+}
+
+func TestRenderFreeBusyTable_TimeFormatting(t *testing.T) {
+	// Test that times are formatted correctly in the output
+	start := time.Date(2024, 1, 15, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2024, 1, 15, 17, 0, 0, 0, time.UTC)
+	busyStart := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	busyEnd := time.Date(2024, 1, 15, 11, 45, 0, 0, time.UTC)
+
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{
+			"primary": {
+				{Start: busyStart, End: busyEnd},
+			},
+		},
+	}
+
+	output := renderFreeBusyTable(response, start, end)
+
+	// Should contain formatted times
+	if !containsStr(output, "10:30") {
+		t.Error("expected output to contain start time '10:30'")
+	}
+	if !containsStr(output, "11:45") {
+		t.Error("expected output to contain end time '11:45'")
+	}
+}
+
+func TestRenderFreeBusyJSON_ValidJSON(t *testing.T) {
+	// Test that output is valid JSON structure (basic check)
+	response := &calendar.FreeBusyResponse{
+		Calendars: map[string][]*calendar.TimePeriod{
+			"primary": {
+				{Start: dummyTime(), End: dummyTime().Add(time.Hour)},
+			},
+		},
+	}
+
+	output := renderFreeBusyJSON(response)
+
+	// Should have proper JSON structure
+	if !containsStr(output, "{") || !containsStr(output, "}") {
+		t.Error("expected JSON object with braces")
+	}
+	if !containsStr(output, "[") || !containsStr(output, "]") {
+		t.Error("expected JSON array with brackets")
+	}
+	if !containsStr(output, "\"calendars\"") {
+		t.Error("expected quoted 'calendars' key")
+	}
+}

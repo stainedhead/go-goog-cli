@@ -5,12 +5,18 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/stainedhead/go-goog-cli/internal/domain/account"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/auth"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
 	"golang.org/x/oauth2"
+)
+
+const (
+	// EnvAccount is the environment variable name for specifying the default account.
+	EnvAccount = "GOOG_ACCOUNT"
 )
 
 // Store defines the interface for secure credential storage.
@@ -126,10 +132,14 @@ func (s *Service) Remove(alias string) error {
 	// If this was the default account, clear it
 	if s.cfg.DefaultAccount == alias {
 		s.cfg.DefaultAccount = ""
-		// Set a new default if accounts remain
-		for a := range s.cfg.Accounts {
-			s.cfg.DefaultAccount = a
-			break
+		// Set a new default if accounts remain (use sorted order for deterministic behavior)
+		if len(s.cfg.Accounts) > 0 {
+			aliases := make([]string, 0, len(s.cfg.Accounts))
+			for a := range s.cfg.Accounts {
+				aliases = append(aliases, a)
+			}
+			sort.Strings(aliases)
+			s.cfg.DefaultAccount = aliases[0]
 		}
 	}
 
@@ -141,11 +151,18 @@ func (s *Service) Remove(alias string) error {
 	return nil
 }
 
-// List returns all configured accounts.
+// List returns all configured accounts in sorted order by alias.
 func (s *Service) List() ([]*account.Account, error) {
-	accounts := make([]*account.Account, 0, len(s.cfg.Accounts))
+	// Get sorted list of aliases for deterministic ordering
+	aliases := make([]string, 0, len(s.cfg.Accounts))
+	for alias := range s.cfg.Accounts {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
 
-	for alias, accCfg := range s.cfg.Accounts {
+	accounts := make([]*account.Account, 0, len(s.cfg.Accounts))
+	for _, alias := range aliases {
+		accCfg := s.cfg.Accounts[alias]
 		acc := account.NewAccount(alias, accCfg.Email)
 		acc.Scopes = accCfg.Scopes
 		acc.Added = accCfg.AddedAt
@@ -201,6 +218,9 @@ func (s *Service) Rename(oldAlias, newAlias string) error {
 	}
 
 	// Load scopes with old alias
+	// Note: We ignore the error here because scopes are optional metadata.
+	// If scopes don't exist (e.g., old account without scopes saved),
+	// we'll just skip copying them. The token itself is the critical data.
 	scopes, _ := s.tokens.GetGrantedScopes(oldAlias)
 
 	// Save token with new alias (if token exists)
@@ -213,8 +233,13 @@ func (s *Service) Rename(oldAlias, newAlias string) error {
 				return fmt.Errorf("failed to save scopes: %w", err)
 			}
 		}
-		// Delete old token
-		_ = s.tokens.DeleteToken(oldAlias)
+		// Delete old token - best effort, don't fail the rename if this errors
+		// The new token is already saved, so the rename is functionally complete.
+		if err := s.tokens.DeleteToken(oldAlias); err != nil {
+			// Log or ignore - the old token remains but won't be used
+			// since the config now points to newAlias
+			_ = err
+		}
 	}
 
 	// Add with new alias
@@ -251,7 +276,7 @@ func (s *Service) ResolveAccount(flagValue string) (*account.Account, error) {
 
 	// 2. Environment variable
 	if alias == "" {
-		alias = os.Getenv("GOOG_ACCOUNT")
+		alias = os.Getenv(EnvAccount)
 	}
 
 	// 3. Default account
@@ -259,12 +284,14 @@ func (s *Service) ResolveAccount(flagValue string) (*account.Account, error) {
 		alias = s.cfg.DefaultAccount
 	}
 
-	// 4. First account fallback
-	if alias == "" {
+	// 4. First account fallback (use sorted order for deterministic behavior)
+	if alias == "" && len(s.cfg.Accounts) > 0 {
+		aliases := make([]string, 0, len(s.cfg.Accounts))
 		for a := range s.cfg.Accounts {
-			alias = a
-			break
+			aliases = append(aliases, a)
 		}
+		sort.Strings(aliases)
+		alias = aliases[0]
 	}
 
 	// Still no alias - no accounts configured

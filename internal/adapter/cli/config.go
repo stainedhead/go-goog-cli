@@ -3,6 +3,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
@@ -125,7 +126,15 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	if len(cfg.Accounts) > 0 {
 		cmd.Println()
 		cmd.Println("accounts:")
-		for alias, acc := range cfg.Accounts {
+		// Sort aliases for deterministic output
+		aliases := make([]string, 0, len(cfg.Accounts))
+		for alias := range cfg.Accounts {
+			aliases = append(aliases, alias)
+		}
+		sort.Strings(aliases)
+
+		for _, alias := range aliases {
+			acc := cfg.Accounts[alias]
 			cmd.Printf("  %s:\n", alias)
 			cmd.Printf("    email: %s\n", acc.Email)
 			if !acc.AddedAt.IsZero() {

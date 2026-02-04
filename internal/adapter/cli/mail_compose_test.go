@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -695,5 +696,331 @@ func TestMailForwardCmd_HasRequiredFlags(t *testing.T) {
 		if flag == nil {
 			t.Errorf("expected --%s flag to be defined on forward command", flagName)
 		}
+	}
+}
+
+// =============================================================================
+// Edge Case and Error Path Tests
+// =============================================================================
+
+func TestParseEmailRecipients_ErrorPaths(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []string
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name:      "email with spaces",
+			input:     []string{"user @example.com"},
+			expectErr: true,
+			errMsg:    "invalid email address",
+		},
+		{
+			name:      "email with multiple @",
+			input:     []string{"user@@example.com"},
+			expectErr: true,
+			errMsg:    "invalid email address",
+		},
+		{
+			name:      "email without TLD",
+			input:     []string{"user@example"},
+			expectErr: true,
+			errMsg:    "invalid email address",
+		},
+		{
+			name:      "just @ symbol",
+			input:     []string{"@"},
+			expectErr: true,
+			errMsg:    "invalid email address",
+		},
+		{
+			name:      "special characters only",
+			input:     []string{"!@#$%"},
+			expectErr: true,
+			errMsg:    "invalid email address",
+		},
+		{
+			name:      "very long email",
+			input:     []string{"verylongemailaddressthatexceedsnormallimitsbutshouldbetested@verylongdomainname.com"},
+			expectErr: false, // Should be valid
+		},
+		{
+			name:      "email with plus sign (valid)",
+			input:     []string{"user+tag@example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "email with dots (valid)",
+			input:     []string{"first.last@example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "email with numbers (valid)",
+			input:     []string{"user123@example123.com"},
+			expectErr: false,
+		},
+		{
+			name:      "mixed valid and invalid with whitespace",
+			input:     []string{"valid@example.com", "  ", "invalid@"},
+			expectErr: true,
+			errMsg:    "invalid email address",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseEmailRecipients(tt.input)
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("expected error for input %v, got nil", tt.input)
+				}
+				if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error to contain %q, got %q", tt.errMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if len(result) == 0 && len(tt.input) > 0 {
+					// Only fail if input was non-empty
+					hasNonEmpty := false
+					for _, s := range tt.input {
+						if strings.TrimSpace(s) != "" {
+							hasNonEmpty = true
+							break
+						}
+					}
+					if hasNonEmpty {
+						t.Error("expected non-empty result")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestBuildReplySubject_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "mixed case Re:",
+			input:    "rE: Test",
+			expected: "rE: Test",
+		},
+		{
+			name:     "Re: with leading/trailing spaces",
+			input:    "  Re: Test  ",
+			expected: "Re:   Re: Test  ", // Doesn't trim, just checks prefix
+		},
+		{
+			name:     "multiple Re: prefixes",
+			input:    "Re: Re: Test",
+			expected: "Re: Re: Test",
+		},
+		{
+			name:     "RE: in middle",
+			input:    "Test RE: something",
+			expected: "Re: Test RE: something",
+		},
+		{
+			name:     "very long subject",
+			input:    "This is a very long subject line that goes on and on and on and on and on and on",
+			expected: "Re: This is a very long subject line that goes on and on and on and on and on and on",
+		},
+		{
+			name:     "unicode characters",
+			input:    "Hello 世界",
+			expected: "Re: Hello 世界",
+		},
+		{
+			name:     "special characters",
+			input:    "Test: [IMPORTANT] #123",
+			expected: "Re: Test: [IMPORTANT] #123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildReplySubject(tt.input)
+			if result != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestMailSendCmd_EmptyBodies(t *testing.T) {
+	// Test that send can work with empty body
+	origTo := mailSendTo
+	origSubject := mailSendSubject
+	origBody := mailSendBody
+
+	mailSendTo = []string{"user@example.com"}
+	mailSendSubject = "Empty Body Test"
+	mailSendBody = "" // Empty body should be allowed
+
+	mockCmd := &cobra.Command{Use: "test"}
+	err := mailSendCmd.PreRunE(mockCmd, []string{})
+
+	mailSendTo = origTo
+	mailSendSubject = origSubject
+	mailSendBody = origBody
+
+	if err != nil {
+		t.Errorf("unexpected error with empty body: %v", err)
+	}
+}
+
+func TestMailSendCmd_EmptySubject(t *testing.T) {
+	// Test that send can work with empty subject
+	origTo := mailSendTo
+	origSubject := mailSendSubject
+	origBody := mailSendBody
+
+	mailSendTo = []string{"user@example.com"}
+	mailSendSubject = "" // Empty subject should be allowed
+	mailSendBody = "Test body"
+
+	mockCmd := &cobra.Command{Use: "test"}
+	err := mailSendCmd.PreRunE(mockCmd, []string{})
+
+	mailSendTo = origTo
+	mailSendSubject = origSubject
+	mailSendBody = origBody
+
+	if err != nil {
+		t.Errorf("unexpected error with empty subject: %v", err)
+	}
+}
+
+func TestMailSendCmd_MultipleRecipients(t *testing.T) {
+	// Test validation with many recipients
+	tests := []struct {
+		name      string
+		to        []string
+		cc        []string
+		bcc       []string
+		expectErr bool
+	}{
+		{
+			name:      "many to recipients",
+			to:        []string{"user1@example.com", "user2@example.com", "user3@example.com", "user4@example.com", "user5@example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "to, cc, and bcc",
+			to:        []string{"user1@example.com"},
+			cc:        []string{"user2@example.com", "user3@example.com"},
+			bcc:       []string{"user4@example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "invalid in to list",
+			to:        []string{"valid@example.com", "invalid"},
+			expectErr: false, // PreRunE only checks length, not validity
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origTo := mailSendTo
+			mailSendTo = tt.to
+
+			mockCmd := &cobra.Command{Use: "test"}
+			err := mailSendCmd.PreRunE(mockCmd, []string{})
+
+			mailSendTo = origTo
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailReplyCmd_EmptyMessageID(t *testing.T) {
+	// Test Args validator with empty string (not zero args)
+	err := mailReplyCmd.Args(mailReplyCmd, []string{""})
+	// Should pass Args validation (it only checks count), but would fail in execution
+	if err != nil {
+		t.Errorf("Args validator should accept empty string: %v", err)
+	}
+}
+
+func TestMailForwardCmd_EmptyMessageID(t *testing.T) {
+	// Test Args validator with empty string (not zero args)
+	err := mailForwardCmd.Args(mailForwardCmd, []string{""})
+	// Should pass Args validation (it only checks count), but would fail in execution
+	if err != nil {
+		t.Errorf("Args validator should accept empty string: %v", err)
+	}
+}
+
+func TestParseEmailRecipients_BoundaryConditions(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []string
+		expectErr bool
+	}{
+		{
+			name:      "single character local part",
+			input:     []string{"a@example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "email with subdomain",
+			input:     []string{"user@mail.example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "email with hyphen in domain",
+			input:     []string{"user@ex-ample.com"},
+			expectErr: false,
+		},
+		{
+			name:      "email with underscore in local",
+			input:     []string{"user_name@example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "empty string in middle of list",
+			input:     []string{"user1@example.com", "", "user2@example.com"},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseEmailRecipients(tt.input)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				// Count non-empty inputs
+				expectedCount := 0
+				for _, s := range tt.input {
+					if strings.TrimSpace(s) != "" {
+						expectedCount++
+					}
+				}
+				if len(result) != expectedCount {
+					t.Errorf("expected %d results, got %d", expectedCount, len(result))
+				}
+			}
+		})
 	}
 }

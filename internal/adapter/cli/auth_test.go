@@ -3,9 +3,14 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
+	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
+	"golang.org/x/oauth2"
 )
 
 func TestAuthCmd_Help(t *testing.T) {
@@ -334,4 +339,591 @@ func TestGetEnvWithDefault(t *testing.T) {
 
 func contains(s, substr string) bool {
 	return bytes.Contains([]byte(s), []byte(substr))
+}
+
+// =============================================================================
+// Execution Tests with Mocks
+// =============================================================================
+
+// MockAccountServiceExtended extends MockAccountService with additional methods needed by auth commands.
+type MockAccountServiceExtended struct {
+	MockAccountService
+	AddFunc    func(ctx context.Context, alias string, scopes []string) (*accountuc.Account, error)
+	RemoveFunc func(alias string) error
+	SwitchFunc func(alias string) error
+	RenameFunc func(oldAlias, newAlias string) error
+	AddResult  *accountuc.Account
+	AddErr     error
+	RemoveErr  error
+	SwitchErr  error
+	RenameErr  error
+}
+
+func (m *MockAccountServiceExtended) Add(ctx context.Context, alias string, scopes []string) (*accountuc.Account, error) {
+	if m.AddFunc != nil {
+		return m.AddFunc(ctx, alias, scopes)
+	}
+	if m.AddErr != nil {
+		return nil, m.AddErr
+	}
+	if m.AddResult != nil {
+		return m.AddResult, nil
+	}
+	return &accountuc.Account{
+		Alias:     alias,
+		Email:     "test@example.com",
+		IsDefault: true,
+	}, nil
+}
+
+func (m *MockAccountServiceExtended) Remove(alias string) error {
+	if m.RemoveFunc != nil {
+		return m.RemoveFunc(alias)
+	}
+	return m.RemoveErr
+}
+
+func (m *MockAccountServiceExtended) Switch(alias string) error {
+	if m.SwitchFunc != nil {
+		return m.SwitchFunc(alias)
+	}
+	return m.SwitchErr
+}
+
+func (m *MockAccountServiceExtended) Rename(oldAlias, newAlias string) error {
+	if m.RenameFunc != nil {
+		return m.RenameFunc(oldAlias, newAlias)
+	}
+	return m.RenameErr
+}
+
+// MockTokenManagerExtended extends MockTokenManager with additional methods needed by auth commands.
+type MockTokenManagerExtended struct {
+	MockTokenManager
+	GetTokenInfoFunc     func(alias string) (*TokenInfo, error)
+	RefreshTokenFunc     func(ctx context.Context, alias string, cfg interface{}) (*oauth2.Token, error)
+	GetGrantedScopesFunc func(alias string) ([]string, error)
+	TokenInfo            *TokenInfo
+	TokenInfoErr         error
+	RefreshTokenRes      *oauth2.Token
+	RefreshTokenErr      error
+	GrantedScopes        []string
+	GrantedScopesErr     error
+}
+
+// TokenInfo represents token information for display.
+type TokenInfo struct {
+	HasToken   bool
+	IsExpired  bool
+	ExpiryTime string
+	Scopes     []string
+}
+
+func (m *MockTokenManagerExtended) GetTokenInfo(alias string) (*TokenInfo, error) {
+	if m.GetTokenInfoFunc != nil {
+		return m.GetTokenInfoFunc(alias)
+	}
+	if m.TokenInfoErr != nil {
+		return nil, m.TokenInfoErr
+	}
+	if m.TokenInfo != nil {
+		return m.TokenInfo, nil
+	}
+	return &TokenInfo{
+		HasToken:   true,
+		IsExpired:  false,
+		ExpiryTime: time.Now().Add(time.Hour).Format(time.RFC3339),
+		Scopes:     []string{"email", "openid"},
+	}, nil
+}
+
+func (m *MockTokenManagerExtended) RefreshToken(ctx context.Context, alias string, cfg interface{}) (*oauth2.Token, error) {
+	if m.RefreshTokenFunc != nil {
+		return m.RefreshTokenFunc(ctx, alias, cfg)
+	}
+	if m.RefreshTokenErr != nil {
+		return nil, m.RefreshTokenErr
+	}
+	if m.RefreshTokenRes != nil {
+		return m.RefreshTokenRes, nil
+	}
+	return &oauth2.Token{
+		AccessToken: "refreshed-token",
+		Expiry:      time.Now().Add(time.Hour),
+	}, nil
+}
+
+func (m *MockTokenManagerExtended) GetGrantedScopes(alias string) ([]string, error) {
+	if m.GetGrantedScopesFunc != nil {
+		return m.GetGrantedScopesFunc(alias)
+	}
+	if m.GrantedScopesErr != nil {
+		return nil, m.GrantedScopesErr
+	}
+	return m.GrantedScopes, nil
+}
+
+// TestAuthLogin_Execution tests auth login command execution with mocks.
+func TestAuthLogin_Execution(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		setupMock    func(*MockAccountServiceExtended)
+		expectError  bool
+		expectOutput string
+	}{
+		{
+			name: "successful login with default alias",
+			args: []string{"auth", "login"},
+			setupMock: func(m *MockAccountServiceExtended) {
+				m.AddResult = &accountuc.Account{
+					Alias:     "default",
+					Email:     "user@example.com",
+					IsDefault: true,
+				}
+			},
+			expectError:  false,
+			expectOutput: "Successfully logged in as user@example.com",
+		},
+		{
+			name: "successful login with custom alias",
+			args: []string{"auth", "login", "--account", "work"},
+			setupMock: func(m *MockAccountServiceExtended) {
+				m.AddResult = &accountuc.Account{
+					Alias:     "work",
+					Email:     "work@company.com",
+					IsDefault: false,
+				}
+			},
+			expectError:  false,
+			expectOutput: "Successfully logged in as work@company.com",
+		},
+		{
+			name: "login with scopes",
+			args: []string{"auth", "login", "--scopes", "gmail,calendar"},
+			setupMock: func(m *MockAccountServiceExtended) {
+				m.AddFunc = func(ctx context.Context, alias string, scopes []string) (*accountuc.Account, error) {
+					// Verify scopes were parsed and expanded
+					if len(scopes) < 2 {
+						t.Errorf("expected at least 2 scopes, got %d", len(scopes))
+					}
+					return &accountuc.Account{
+						Alias:     alias,
+						Email:     "user@example.com",
+						IsDefault: true,
+					}, nil
+				}
+			},
+			expectError:  false,
+			expectOutput: "Successfully logged in",
+		},
+		{
+			name: "login failure",
+			args: []string{"auth", "login"},
+			setupMock: func(m *MockAccountServiceExtended) {
+				m.AddErr = fmt.Errorf("authentication failed")
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup mock
+			mockSvc := &MockAccountServiceExtended{}
+			if tt.setupMock != nil {
+				tt.setupMock(mockSvc)
+			}
+
+			// Set dependencies
+			deps := &Dependencies{
+				AccountService: mockSvc,
+				RepoFactory:    &MockRepositoryFactory{},
+			}
+			SetDependencies(deps)
+			defer ResetDependencies()
+
+			// Create command
+			cmd := &cobra.Command{Use: "goog"}
+			cmd.AddCommand(authCmd)
+
+			// Capture output
+			buf := new(bytes.Buffer)
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetArgs(tt.args)
+
+			// Reset global flags
+			accountFlag = ""
+
+			// Execute
+			err := cmd.Execute()
+
+			// Check error expectation
+			if tt.expectError && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			// Check output
+			if tt.expectOutput != "" {
+				output := buf.String()
+				if !contains(output, tt.expectOutput) {
+					t.Errorf("expected output to contain %q, got: %s", tt.expectOutput, output)
+				}
+			}
+		})
+	}
+}
+
+// TestAuthLogout_Execution tests auth logout command execution with mocks.
+func TestAuthLogout_Execution(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		setupMock    func(*MockAccountServiceExtended)
+		expectError  bool
+		expectOutput string
+	}{
+		{
+			name: "successful logout",
+			args: []string{"auth", "logout"},
+			setupMock: func(m *MockAccountServiceExtended) {
+				m.Account = &accountuc.Account{
+					Alias: "default",
+					Email: "user@example.com",
+				}
+			},
+			expectError:  false,
+			expectOutput: "Successfully logged out",
+		},
+		{
+			name: "logout from specific account",
+			args: []string{"auth", "logout", "--account", "work"},
+			setupMock: func(m *MockAccountServiceExtended) {
+				m.Account = &accountuc.Account{
+					Alias: "work",
+					Email: "work@company.com",
+				}
+			},
+			expectError:  false,
+			expectOutput: "Successfully logged out from work",
+		},
+		{
+			name: "logout with no account found",
+			args: []string{"auth", "logout"},
+			setupMock: func(m *MockAccountServiceExtended) {
+				m.ResolveErr = fmt.Errorf("no account found")
+			},
+			expectError: true,
+		},
+		{
+			name: "logout with removal error",
+			args: []string{"auth", "logout"},
+			setupMock: func(m *MockAccountServiceExtended) {
+				m.Account = &accountuc.Account{
+					Alias: "default",
+					Email: "user@example.com",
+				}
+				m.RemoveErr = fmt.Errorf("failed to remove")
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup mock
+			mockSvc := &MockAccountServiceExtended{}
+			if tt.setupMock != nil {
+				tt.setupMock(mockSvc)
+			}
+
+			// Set dependencies
+			deps := &Dependencies{
+				AccountService: mockSvc,
+				RepoFactory:    &MockRepositoryFactory{},
+			}
+			SetDependencies(deps)
+			defer ResetDependencies()
+
+			// Create command
+			cmd := &cobra.Command{Use: "goog"}
+			cmd.AddCommand(authCmd)
+
+			// Capture output
+			buf := new(bytes.Buffer)
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetArgs(tt.args)
+
+			// Reset global flags
+			accountFlag = ""
+
+			// Execute
+			err := cmd.Execute()
+
+			// Check error expectation
+			if tt.expectError && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			// Check output
+			if tt.expectOutput != "" {
+				output := buf.String()
+				if !contains(output, tt.expectOutput) {
+					t.Errorf("expected output to contain %q, got: %s", tt.expectOutput, output)
+				}
+			}
+		})
+	}
+}
+
+// TestAuthStatus_Execution tests auth status command execution with mocks.
+func TestAuthStatus_Execution(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		setupMock     func(*MockAccountServiceExtended, *MockTokenManagerExtended)
+		expectError   bool
+		expectOutputs []string
+	}{
+		{
+			name: "status with active token",
+			args: []string{"auth", "status"},
+			setupMock: func(m *MockAccountServiceExtended, tm *MockTokenManagerExtended) {
+				m.Account = &accountuc.Account{
+					Alias:     "default",
+					Email:     "user@example.com",
+					IsDefault: true,
+					Added:     time.Now(),
+				}
+				tm.TokenInfo = &TokenInfo{
+					HasToken:   true,
+					IsExpired:  false,
+					ExpiryTime: time.Now().Add(time.Hour).Format(time.RFC3339),
+					Scopes:     []string{"email", "openid"},
+				}
+				m.TokenManager = tm
+			},
+			expectError: false,
+			expectOutputs: []string{
+				"Account:",
+				"Email:",
+				"user@example.com",
+				"Token:",
+				"Valid",
+				"ACTIVE",
+			},
+		},
+		{
+			name: "status with expired token",
+			args: []string{"auth", "status"},
+			setupMock: func(m *MockAccountServiceExtended, tm *MockTokenManagerExtended) {
+				m.Account = &accountuc.Account{
+					Alias: "default",
+					Email: "user@example.com",
+				}
+				tm.TokenInfo = &TokenInfo{
+					HasToken:  true,
+					IsExpired: true,
+				}
+				m.TokenManager = tm
+			},
+			expectError: false,
+			expectOutputs: []string{
+				"Token:",
+				"Valid",
+				"EXPIRED",
+			},
+		},
+		{
+			name: "status with no token",
+			args: []string{"auth", "status"},
+			setupMock: func(m *MockAccountServiceExtended, tm *MockTokenManagerExtended) {
+				m.Account = &accountuc.Account{
+					Alias: "default",
+					Email: "user@example.com",
+				}
+				tm.TokenInfo = &TokenInfo{
+					HasToken: false,
+				}
+				m.TokenManager = tm
+			},
+			expectError: false,
+			expectOutputs: []string{
+				"Token:",
+				"Not found",
+				"NOT AUTHENTICATED",
+			},
+		},
+		{
+			name: "status with no account",
+			args: []string{"auth", "status"},
+			setupMock: func(m *MockAccountServiceExtended, tm *MockTokenManagerExtended) {
+				m.ResolveErr = fmt.Errorf("no account found")
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup mocks
+			mockTM := &MockTokenManagerExtended{}
+			mockSvc := &MockAccountServiceExtended{}
+			if tt.setupMock != nil {
+				tt.setupMock(mockSvc, mockTM)
+			}
+
+			// Set dependencies
+			deps := &Dependencies{
+				AccountService: mockSvc,
+				RepoFactory:    &MockRepositoryFactory{},
+			}
+			SetDependencies(deps)
+			defer ResetDependencies()
+
+			// Create command
+			cmd := &cobra.Command{Use: "goog"}
+			cmd.AddCommand(authCmd)
+
+			// Capture output
+			buf := new(bytes.Buffer)
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetArgs(tt.args)
+
+			// Reset global flags
+			accountFlag = ""
+
+			// Execute
+			err := cmd.Execute()
+
+			// Check error expectation
+			if tt.expectError && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			// Check outputs
+			if len(tt.expectOutputs) > 0 {
+				output := buf.String()
+				for _, expected := range tt.expectOutputs {
+					if !contains(output, expected) {
+						t.Errorf("expected output to contain %q, got: %s", expected, output)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestAuthRefresh_Execution tests auth refresh command execution with mocks.
+func TestAuthRefresh_Execution(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		setupMock    func(*MockAccountServiceExtended, *MockTokenManagerExtended)
+		expectError  bool
+		expectOutput string
+	}{
+		{
+			name: "successful refresh",
+			args: []string{"auth", "refresh"},
+			setupMock: func(m *MockAccountServiceExtended, tm *MockTokenManagerExtended) {
+				m.Account = &accountuc.Account{
+					Alias: "default",
+					Email: "user@example.com",
+				}
+				tm.GrantedScopes = []string{"email", "openid"}
+				tm.RefreshTokenRes = &oauth2.Token{
+					AccessToken: "new-token",
+					Expiry:      time.Now().Add(time.Hour),
+				}
+				m.TokenManager = tm
+			},
+			expectError:  false,
+			expectOutput: "Successfully refreshed token",
+		},
+		{
+			name: "refresh with no account",
+			args: []string{"auth", "refresh"},
+			setupMock: func(m *MockAccountServiceExtended, tm *MockTokenManagerExtended) {
+				m.ResolveErr = fmt.Errorf("no account found")
+			},
+			expectError: true,
+		},
+		{
+			name: "refresh with token error",
+			args: []string{"auth", "refresh"},
+			setupMock: func(m *MockAccountServiceExtended, tm *MockTokenManagerExtended) {
+				m.Account = &accountuc.Account{
+					Alias: "default",
+					Email: "user@example.com",
+				}
+				tm.RefreshTokenErr = fmt.Errorf("refresh failed")
+				m.TokenManager = tm
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup mocks
+			mockTM := &MockTokenManagerExtended{}
+			mockSvc := &MockAccountServiceExtended{}
+			if tt.setupMock != nil {
+				tt.setupMock(mockSvc, mockTM)
+			}
+
+			// Set dependencies
+			deps := &Dependencies{
+				AccountService: mockSvc,
+				RepoFactory:    &MockRepositoryFactory{},
+			}
+			SetDependencies(deps)
+			defer ResetDependencies()
+
+			// Create command
+			cmd := &cobra.Command{Use: "goog"}
+			cmd.AddCommand(authCmd)
+
+			// Capture output
+			buf := new(bytes.Buffer)
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SetArgs(tt.args)
+
+			// Reset global flags
+			accountFlag = ""
+
+			// Execute
+			err := cmd.Execute()
+
+			// Check error expectation
+			if tt.expectError && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			// Check output
+			if tt.expectOutput != "" {
+				output := buf.String()
+				if !contains(output, tt.expectOutput) {
+					t.Errorf("expected output to contain %q, got: %s", tt.expectOutput, output)
+				}
+			}
+		})
+	}
 }
