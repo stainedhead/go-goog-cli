@@ -24,6 +24,7 @@ var (
 	mailListLabels         []string
 	mailListUnreadOnly     bool
 	mailSearchMaxResults   int
+	mailMoveDestination    string
 )
 
 // mailCmd represents the mail command group.
@@ -177,6 +178,38 @@ with --star/--unstar, but cannot use conflicting flags together.`,
 	RunE: runMailMark,
 }
 
+// mailMoveCmd moves a message to a label/folder.
+var mailMoveCmd = &cobra.Command{
+	Use:   "move <message-id>",
+	Short: "Move a message to a label/folder",
+	Long: `Move a message to a specific label or folder.
+
+This removes the INBOX label and adds the specified destination label.
+The destination can be any valid label name or ID.
+
+Common labels:
+  INBOX, STARRED, IMPORTANT, UNREAD, SPAM, TRASH,
+  CATEGORY_PERSONAL, CATEGORY_SOCIAL, CATEGORY_PROMOTIONS,
+  CATEGORY_UPDATES, CATEGORY_FORUMS`,
+	Example: `  # Move a message to a custom label
+  goog mail move msg123abc --to "Work/Projects"
+
+  # Move a message to Important
+  goog mail move msg123abc --to IMPORTANT
+
+  # Move a message to a category
+  goog mail move msg123abc --to CATEGORY_PROMOTIONS`,
+	Args: cobra.ExactArgs(1),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if mailMoveDestination == "" {
+			cmd.PrintErrln("Error: --to flag is required to specify destination label")
+			return fmt.Errorf("--to flag required")
+		}
+		return nil
+	},
+	RunE: runMailMove,
+}
+
 // mailListCmd lists messages in the inbox.
 var mailListCmd = &cobra.Command{
 	Use:   "list",
@@ -270,6 +303,7 @@ func init() {
 	mailCmd.AddCommand(mailDeleteCmd)
 	mailCmd.AddCommand(mailModifyCmd)
 	mailCmd.AddCommand(mailMarkCmd)
+	mailCmd.AddCommand(mailMoveCmd)
 
 	// List command flags
 	mailListCmd.Flags().IntVar(&mailListMaxResults, "max-results", 10, "maximum number of messages to return")
@@ -291,6 +325,9 @@ func init() {
 	mailMarkCmd.Flags().BoolVar(&mailMarkUnread, "unread", false, "mark as unread")
 	mailMarkCmd.Flags().BoolVar(&mailMarkStar, "star", false, "add star")
 	mailMarkCmd.Flags().BoolVar(&mailMarkUnstar, "unstar", false, "remove star")
+
+	// Move flags
+	mailMoveCmd.Flags().StringVar(&mailMoveDestination, "to", "", "destination label/folder (required)")
 
 	// Add mail command to root
 	rootCmd.AddCommand(mailCmd)
@@ -588,6 +625,39 @@ func runMailMark(cmd *cobra.Command, args []string) error {
 			actionStr += a
 		}
 		cmd.Printf("Message %s %s\n", messageID, actionStr)
+	}
+	return nil
+}
+
+// runMailMove handles the mail move command.
+func runMailMove(cmd *cobra.Command, args []string) error {
+	messageID := args[0]
+	ctx := context.Background()
+
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Move is implemented as a modify operation:
+	// - Add the destination label
+	// - Remove INBOX label (to move out of inbox)
+	req := mail.ModifyRequest{
+		AddLabels:    []string{mailMoveDestination},
+		RemoveLabels: []string{"INBOX"},
+	}
+
+	msg, err := repo.Modify(ctx, messageID, req)
+	if err != nil {
+		return fmt.Errorf("failed to move message: %w", err)
+	}
+
+	if !quietFlag {
+		cmd.Printf("Message %s moved to %s\n", messageID, mailMoveDestination)
+		if verboseFlag && msg != nil {
+			cmd.Printf("Current labels: %v\n", msg.Labels)
+		}
 	}
 	return nil
 }

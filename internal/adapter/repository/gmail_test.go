@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1799,5 +1801,1366 @@ func TestGmailRepository_BadRequestError(t *testing.T) {
 
 	if !strings.Contains(err.Error(), ErrBadRequest.Error()) {
 		t.Errorf("expected bad request error, got %v", err)
+	}
+}
+
+// =============================================================================
+// Additional Tests for Coverage Improvement
+// =============================================================================
+
+// TestBuildReplyMimeMessage tests building MIME message for replies.
+func TestBuildReplyMimeMessage(t *testing.T) {
+	tests := []struct {
+		name              string
+		msg               *mail.Message
+		originalMessageID string
+		wantHeaders       []string
+	}{
+		{
+			name: "basic reply",
+			msg: &mail.Message{
+				From:    "sender@example.com",
+				To:      []string{"recipient@example.com"},
+				Subject: "Re: Test Subject",
+				Body:    "Reply body",
+			},
+			originalMessageID: "original-msg-123",
+			wantHeaders: []string{
+				"From: sender@example.com",
+				"To: recipient@example.com",
+				"Subject: Re: Test Subject",
+				"In-Reply-To: <original-msg-123>",
+				"References: <original-msg-123>",
+				"MIME-Version: 1.0",
+			},
+		},
+		{
+			name: "reply with cc",
+			msg: &mail.Message{
+				From:    "sender@example.com",
+				To:      []string{"recipient@example.com"},
+				Cc:      []string{"cc1@example.com", "cc2@example.com"},
+				Subject: "Re: With CC",
+				Body:    "Reply with cc",
+			},
+			originalMessageID: "msg-456",
+			wantHeaders: []string{
+				"Cc: cc1@example.com, cc2@example.com",
+			},
+		},
+		{
+			name: "html reply",
+			msg: &mail.Message{
+				From:     "sender@example.com",
+				To:       []string{"recipient@example.com"},
+				Subject:  "Re: HTML Reply",
+				BodyHTML: "<p>HTML reply content</p>",
+			},
+			originalMessageID: "msg-789",
+			wantHeaders: []string{
+				"Content-Type: text/html; charset=\"utf-8\"",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildReplyMimeMessage(tt.msg, tt.originalMessageID)
+			gotStr := string(got)
+
+			for _, header := range tt.wantHeaders {
+				if !strings.Contains(gotStr, header) {
+					t.Errorf("MIME message missing header %q\nGot:\n%s", header, gotStr)
+				}
+			}
+		})
+	}
+}
+
+// TestBuildForwardBody tests forward body generation.
+func TestBuildForwardBody(t *testing.T) {
+	original := &mail.Message{
+		From:    "original@example.com",
+		To:      []string{"recipient@example.com", "another@example.com"},
+		Subject: "Original Subject",
+		Body:    "Original message body",
+		Date:    time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
+	}
+
+	result := buildForwardBody(original)
+
+	// Check for forwarded message marker
+	if !strings.Contains(result, "---------- Forwarded message ---------") {
+		t.Error("Forward body should contain forwarded message marker")
+	}
+
+	// Check for original sender
+	if !strings.Contains(result, "From: original@example.com") {
+		t.Error("Forward body should contain original sender")
+	}
+
+	// Check for original subject
+	if !strings.Contains(result, "Subject: Original Subject") {
+		t.Error("Forward body should contain original subject")
+	}
+
+	// Check for original recipients
+	if !strings.Contains(result, "To: recipient@example.com, another@example.com") {
+		t.Error("Forward body should contain original recipients")
+	}
+
+	// Check for original body
+	if !strings.Contains(result, "Original message body") {
+		t.Error("Forward body should contain original message body")
+	}
+}
+
+// TestDomainMessageToGmail tests domain message to Gmail API conversion.
+func TestDomainMessageToGmail(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  *mail.Message
+	}{
+		{
+			name: "nil message",
+			msg:  nil,
+		},
+		{
+			name: "basic message",
+			msg: &mail.Message{
+				ID:       "msg123",
+				ThreadID: "thread456",
+				From:     "sender@example.com",
+				To:       []string{"recipient@example.com"},
+				Subject:  "Test Subject",
+				Body:     "Message body",
+				Labels:   []string{"INBOX", "UNREAD"},
+			},
+		},
+		{
+			name: "message with html",
+			msg: &mail.Message{
+				ID:       "msg789",
+				From:     "sender@example.com",
+				To:       []string{"recipient@example.com"},
+				Subject:  "HTML Message",
+				BodyHTML: "<p>HTML content</p>",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := domainMessageToGmail(tt.msg)
+
+			if tt.msg == nil {
+				if result != nil {
+					t.Error("expected nil result for nil message")
+				}
+				return
+			}
+
+			if result == nil {
+				t.Error("expected non-nil result")
+				return
+			}
+
+			if result.Id != tt.msg.ID {
+				t.Errorf("ID = %q, want %q", result.Id, tt.msg.ID)
+			}
+			if result.ThreadId != tt.msg.ThreadID {
+				t.Errorf("ThreadId = %q, want %q", result.ThreadId, tt.msg.ThreadID)
+			}
+			if result.Raw == "" {
+				t.Error("Raw should not be empty")
+			}
+		})
+	}
+}
+
+// TestGmailRepository_SearchWithTestServer tests the Search method.
+func TestGmailRepository_SearchWithTestServer(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	msg := MockMessageResponse("msg1", "thread1", "Test Subject", "alice@example.com", "bob@example.com", "Hello")
+
+	ts.MessageListHandler = func(w http.ResponseWriter, r *http.Request) {
+		// Verify query parameter is passed
+		query := r.URL.Query().Get("q")
+		if query != "from:alice@example.com" {
+			WriteJSONResponse(w, MockMessageListResponse([]*gmail.Message{}, "", 0))
+			return
+		}
+		WriteJSONResponse(w, MockMessageListResponse(
+			[]*gmail.Message{{Id: "msg1", ThreadId: "thread1"}},
+			"",
+			1,
+		))
+	}
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		WriteJSONResponse(w, msg)
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	result, err := repo.Search(ctx, "from:alice@example.com", mail.ListOptions{MaxResults: 10})
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+
+	if len(result.Items) != 1 {
+		t.Errorf("expected 1 result, got %d", len(result.Items))
+	}
+}
+
+// TestGmailLabelRepository_GetError tests error handling for label get.
+func TestGmailLabelRepository_GetError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.LabelGetHandler = func(w http.ResponseWriter, r *http.Request, labelID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "label not found")
+	}
+
+	repo := NewGmailLabelRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	_, err := repo.Get(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent label, got nil")
+	}
+	if !strings.Contains(err.Error(), mail.ErrLabelNotFound.Error()) {
+		t.Errorf("expected label not found error, got %v", err)
+	}
+}
+
+// TestGmailLabelRepository_CreateError tests error handling for label create.
+func TestGmailLabelRepository_CreateError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.LabelCreateHandler = func(w http.ResponseWriter, r *http.Request) {
+		WriteErrorResponse(w, http.StatusBadRequest, "invalid label name")
+	}
+
+	repo := NewGmailLabelRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	_, err := repo.Create(ctx, &mail.Label{Name: ""})
+	if err == nil {
+		t.Fatal("expected error for invalid label, got nil")
+	}
+}
+
+// TestGmailLabelRepository_UpdateError tests error handling for label update.
+func TestGmailLabelRepository_UpdateError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.LabelUpdateHandler = func(w http.ResponseWriter, r *http.Request, labelID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "label not found")
+	}
+
+	repo := NewGmailLabelRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	_, err := repo.Update(ctx, &mail.Label{ID: "nonexistent", Name: "Updated"})
+	if err == nil {
+		t.Fatal("expected error for non-existent label, got nil")
+	}
+}
+
+// TestGmailLabelRepository_DeleteError tests error handling for label delete.
+func TestGmailLabelRepository_DeleteError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.LabelDeleteHandler = func(w http.ResponseWriter, r *http.Request, labelID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "label not found")
+	}
+
+	repo := NewGmailLabelRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	err := repo.Delete(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent label, got nil")
+	}
+}
+
+// TestGmailDraftRepository_CreateWithNilMessage tests creating draft without message.
+func TestGmailDraftRepository_CreateWithNilMessage(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	repo := NewGmailDraftRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	_, err := repo.Create(ctx, &mail.Draft{})
+	if err == nil {
+		t.Fatal("expected error for draft without message, got nil")
+	}
+	if !strings.Contains(err.Error(), "draft must have a message") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// TestGmailDraftRepository_UpdateWithNilMessage tests updating draft without message.
+func TestGmailDraftRepository_UpdateWithNilMessage(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	repo := NewGmailDraftRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	_, err := repo.Update(ctx, &mail.Draft{ID: "draft123"})
+	if err == nil {
+		t.Fatal("expected error for draft without message, got nil")
+	}
+	if !strings.Contains(err.Error(), "draft must have a message") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// TestGmailDraftRepository_UpdateNotFound tests updating non-existent draft.
+func TestGmailDraftRepository_UpdateNotFound(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.DraftUpdateHandler = func(w http.ResponseWriter, r *http.Request, draftID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "draft not found")
+	}
+
+	repo := NewGmailDraftRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	_, err := repo.Update(ctx, &mail.Draft{
+		ID: "nonexistent",
+		Message: &mail.Message{
+			From:    "me@example.com",
+			To:      []string{"you@example.com"},
+			Subject: "Test",
+			Body:    "Body",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-existent draft, got nil")
+	}
+}
+
+// TestGmailDraftRepository_SendError tests error handling for draft send.
+func TestGmailDraftRepository_SendError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.DraftSendHandler = func(w http.ResponseWriter, r *http.Request) {
+		WriteErrorResponse(w, http.StatusNotFound, "draft not found")
+	}
+
+	repo := NewGmailDraftRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	_, err := repo.Send(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent draft, got nil")
+	}
+}
+
+// TestGmailDraftRepository_DeleteError tests error handling for draft delete.
+func TestGmailDraftRepository_DeleteError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.DraftDeleteHandler = func(w http.ResponseWriter, r *http.Request, draftID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "draft not found")
+	}
+
+	repo := NewGmailDraftRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	err := repo.Delete(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent draft, got nil")
+	}
+}
+
+// TestGmailThreadRepository_ModifyError tests error handling for thread modify.
+func TestGmailThreadRepository_ModifyError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.ThreadModifyHandler = func(w http.ResponseWriter, r *http.Request, threadID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "thread not found")
+	}
+
+	repo := NewGmailThreadRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	_, err := repo.Modify(ctx, "nonexistent", mail.ModifyRequest{
+		AddLabels: []string{"STARRED"},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-existent thread, got nil")
+	}
+}
+
+// TestGmailThreadRepository_TrashError tests error handling for thread trash.
+func TestGmailThreadRepository_TrashError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.ThreadTrashHandler = func(w http.ResponseWriter, r *http.Request, threadID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "thread not found")
+	}
+
+	repo := NewGmailThreadRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	err := repo.Trash(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent thread, got nil")
+	}
+}
+
+// TestGmailThreadRepository_UntrashError tests error handling for thread untrash.
+func TestGmailThreadRepository_UntrashError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.ThreadUntrashHandler = func(w http.ResponseWriter, r *http.Request, threadID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "thread not found")
+	}
+
+	repo := NewGmailThreadRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	err := repo.Untrash(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent thread, got nil")
+	}
+}
+
+// TestGmailThreadRepository_DeleteError tests error handling for thread delete.
+func TestGmailThreadRepository_DeleteError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.ThreadDeleteHandler = func(w http.ResponseWriter, r *http.Request, threadID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "thread not found")
+	}
+
+	repo := NewGmailThreadRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	err := repo.Delete(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent thread, got nil")
+	}
+}
+
+// TestGmailLabelToDomain tests nil label conversion.
+func TestGmailLabelToDomain_Nil(t *testing.T) {
+	result := gmailLabelToDomain(nil)
+	if result != nil {
+		t.Error("expected nil for nil label")
+	}
+}
+
+// TestGmailLabelToDomain_WithColor tests label with color conversion.
+func TestGmailLabelToDomain_WithColor(t *testing.T) {
+	gmailLabel := &gmail.Label{
+		Id:   "label123",
+		Name: "Colored Label",
+		Type: "user",
+		Color: &gmail.LabelColor{
+			BackgroundColor: "#ff0000",
+			TextColor:       "#ffffff",
+		},
+	}
+
+	result := gmailLabelToDomain(gmailLabel)
+
+	if result.Color == nil {
+		t.Fatal("expected color to be set")
+	}
+	if result.Color.Background != "#ff0000" {
+		t.Errorf("Background = %q, want %q", result.Color.Background, "#ff0000")
+	}
+	if result.Color.Text != "#ffffff" {
+		t.Errorf("Text = %q, want %q", result.Color.Text, "#ffffff")
+	}
+}
+
+// TestDomainLabelToGmail tests domain label to Gmail conversion.
+func TestDomainLabelToGmail(t *testing.T) {
+	tests := []struct {
+		name  string
+		label *mail.Label
+	}{
+		{
+			name:  "nil label",
+			label: nil,
+		},
+		{
+			name: "basic label",
+			label: &mail.Label{
+				ID:   "label123",
+				Name: "Test Label",
+				Type: "user",
+			},
+		},
+		{
+			name: "label with color",
+			label: &mail.Label{
+				ID:   "label456",
+				Name: "Colored Label",
+				Type: "user",
+				Color: &mail.LabelColor{
+					Background: "#00ff00",
+					Text:       "#000000",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := domainLabelToGmail(tt.label)
+
+			if tt.label == nil {
+				if result != nil {
+					t.Error("expected nil for nil label")
+				}
+				return
+			}
+
+			if result.Id != tt.label.ID {
+				t.Errorf("Id = %q, want %q", result.Id, tt.label.ID)
+			}
+			if result.Name != tt.label.Name {
+				t.Errorf("Name = %q, want %q", result.Name, tt.label.Name)
+			}
+
+			if tt.label.Color != nil {
+				if result.Color == nil {
+					t.Fatal("expected color to be set")
+				}
+				if result.Color.BackgroundColor != tt.label.Color.Background {
+					t.Errorf("BackgroundColor = %q, want %q", result.Color.BackgroundColor, tt.label.Color.Background)
+				}
+			}
+		})
+	}
+}
+
+// TestGmailDraftToDomain tests nil draft conversion.
+func TestGmailDraftToDomain_Nil(t *testing.T) {
+	result := gmailDraftToDomain(nil)
+	if result != nil {
+		t.Error("expected nil for nil draft")
+	}
+}
+
+// TestGmailDraftToDomain_WithoutMessage tests draft without message conversion.
+func TestGmailDraftToDomain_WithoutMessage(t *testing.T) {
+	gmailDraft := &gmail.Draft{
+		Id: "draft123",
+	}
+
+	result := gmailDraftToDomain(gmailDraft)
+
+	if result.ID != "draft123" {
+		t.Errorf("ID = %q, want %q", result.ID, "draft123")
+	}
+	if result.Message != nil {
+		t.Error("expected Message to be nil")
+	}
+}
+
+// TestGmailThreadToDomain_Nil tests nil thread conversion.
+func TestGmailThreadToDomain_Nil(t *testing.T) {
+	result := gmailThreadToDomain(nil)
+	if result != nil {
+		t.Error("expected nil for nil thread")
+	}
+}
+
+// TestGmailThreadToDomain_WithMessages tests thread with messages conversion.
+func TestGmailThreadToDomain_WithMessages(t *testing.T) {
+	gmailThread := &gmail.Thread{
+		Id:      "thread123",
+		Snippet: "Thread snippet",
+		Messages: []*gmail.Message{
+			{
+				Id:       "msg1",
+				ThreadId: "thread123",
+				LabelIds: []string{"INBOX", "UNREAD"},
+				Payload: &gmail.MessagePart{
+					Headers: []*gmail.MessagePartHeader{
+						{Name: "From", Value: "sender@example.com"},
+						{Name: "Subject", Value: "Message 1"},
+					},
+				},
+			},
+			{
+				Id:       "msg2",
+				ThreadId: "thread123",
+				Payload: &gmail.MessagePart{
+					Headers: []*gmail.MessagePartHeader{
+						{Name: "From", Value: "reply@example.com"},
+						{Name: "Subject", Value: "Re: Message 1"},
+					},
+				},
+			},
+		},
+	}
+
+	result := gmailThreadToDomain(gmailThread)
+
+	if len(result.Messages) != 2 {
+		t.Errorf("Messages count = %d, want 2", len(result.Messages))
+	}
+	if len(result.Labels) != 2 {
+		t.Errorf("Labels count = %d, want 2 (from first message)", len(result.Labels))
+	}
+}
+
+// TestGmailThreadToDomain_EmptyMessages tests thread with empty messages.
+func TestGmailThreadToDomain_EmptyMessages(t *testing.T) {
+	gmailThread := &gmail.Thread{
+		Id:       "thread123",
+		Snippet:  "Empty thread",
+		Messages: []*gmail.Message{},
+	}
+
+	result := gmailThreadToDomain(gmailThread)
+
+	if result.Messages == nil {
+		t.Error("Messages should not be nil")
+	}
+	if len(result.Messages) != 0 {
+		t.Errorf("Messages count = %d, want 0", len(result.Messages))
+	}
+	if result.Labels == nil {
+		t.Error("Labels should not be nil")
+	}
+}
+
+// TestExtractBodyFromPart_NestedMultipart tests nested multipart extraction.
+func TestExtractBodyFromPart_NestedMultipart(t *testing.T) {
+	part := &gmail.MessagePart{
+		MimeType: "multipart/mixed",
+		Parts: []*gmail.MessagePart{
+			{
+				MimeType: "multipart/alternative",
+				Parts: []*gmail.MessagePart{
+					{
+						MimeType: "text/plain",
+						Body: &gmail.MessagePartBody{
+							Data: base64.URLEncoding.EncodeToString([]byte("Plain text nested")),
+						},
+					},
+					{
+						MimeType: "text/html",
+						Body: &gmail.MessagePartBody{
+							Data: base64.URLEncoding.EncodeToString([]byte("<p>HTML nested</p>")),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	plain, html := extractBodyFromPart(part)
+
+	if plain != "Plain text nested" {
+		t.Errorf("plain = %q, want %q", plain, "Plain text nested")
+	}
+	if html != "<p>HTML nested</p>" {
+		t.Errorf("html = %q, want %q", html, "<p>HTML nested</p>")
+	}
+}
+
+// TestExtractBodyFromPart_Nil tests nil part extraction.
+func TestExtractBodyFromPart_Nil(t *testing.T) {
+	plain, html := extractBodyFromPart(nil)
+	if plain != "" || html != "" {
+		t.Error("expected empty strings for nil part")
+	}
+}
+
+// TestParseRecipients_EdgeCases tests recipient parsing edge cases.
+func TestParseRecipients_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: []string{},
+		},
+		{
+			name:     "single recipient",
+			input:    "user@example.com",
+			expected: []string{"user@example.com"},
+		},
+		{
+			name:     "multiple with whitespace",
+			input:    "  user1@example.com  ,  user2@example.com  ",
+			expected: []string{"user1@example.com", "user2@example.com"},
+		},
+		{
+			name:     "trailing comma",
+			input:    "user@example.com,",
+			expected: []string{"user@example.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseRecipients(tt.input)
+			if len(result) != len(tt.expected) {
+				t.Errorf("length = %d, want %d", len(result), len(tt.expected))
+				return
+			}
+			for i, r := range result {
+				if r != tt.expected[i] {
+					t.Errorf("result[%d] = %q, want %q", i, r, tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+// TestMapGmailError_UnknownStatus tests mapping unknown status codes.
+func TestMapGmailError_UnknownStatus(t *testing.T) {
+	err := mapGmailError(418, "I'm a teapot")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "418") {
+		t.Error("error should contain status code")
+	}
+	if !strings.Contains(err.Error(), "I'm a teapot") {
+		t.Error("error should contain message")
+	}
+}
+
+// TestMapGmailError_GatewayErrors tests mapping gateway errors.
+func TestMapGmailError_GatewayErrors(t *testing.T) {
+	tests := []struct {
+		statusCode int
+	}{
+		{http.StatusBadGateway},
+		{http.StatusGatewayTimeout},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("status_%d", tt.statusCode), func(t *testing.T) {
+			err := mapGmailError(tt.statusCode, "gateway error")
+			if !strings.Contains(err.Error(), ErrTemporary.Error()) {
+				t.Errorf("expected temporary error for status %d", tt.statusCode)
+			}
+		})
+	}
+}
+
+// TestIsRetryableError tests retryable error detection.
+func TestIsRetryableError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "temporary error",
+			err:      ErrTemporary,
+			expected: true,
+		},
+		{
+			name:     "rate limited error",
+			err:      ErrRateLimited,
+			expected: true,
+		},
+		{
+			name:     "wrapped temporary error",
+			err:      fmt.Errorf("wrapped: %w", ErrTemporary),
+			expected: true,
+		},
+		{
+			name:     "bad request error",
+			err:      ErrBadRequest,
+			expected: false,
+		},
+		{
+			name:     "generic error",
+			err:      errors.New("generic error"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isRetryableError(tt.err)
+			if result != tt.expected {
+				t.Errorf("isRetryableError() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestRetryWithBackoff_NonRetryableError tests that non-retryable errors don't retry.
+func TestRetryWithBackoff_NonRetryableError(t *testing.T) {
+	ctx := context.Background()
+	attempts := 0
+
+	_, err := retryWithBackoff(ctx, 3, 10*time.Millisecond, func() (string, error) {
+		attempts++
+		return "", ErrBadRequest // Non-retryable error
+	})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (should not retry non-retryable errors)", attempts)
+	}
+}
+
+// TestGmailRepository_ListError tests error handling for list.
+func TestGmailRepository_ListError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.MessageListHandler = func(w http.ResponseWriter, r *http.Request) {
+		WriteErrorResponse(w, http.StatusInternalServerError, "internal error")
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	_, err := repo.List(ctx, mail.ListOptions{MaxResults: 10})
+	if err == nil {
+		t.Fatal("expected error for list failure, got nil")
+	}
+}
+
+// TestGmailRepository_ListWithPartialFailure tests list with some message fetch failures.
+func TestGmailRepository_ListWithPartialFailure(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.MessageListHandler = func(w http.ResponseWriter, r *http.Request) {
+		WriteJSONResponse(w, MockMessageListResponse(
+			[]*gmail.Message{
+				{Id: "msg1", ThreadId: "thread1"},
+				{Id: "msg2", ThreadId: "thread2"},
+			},
+			"",
+			2,
+		))
+	}
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		if msgID == "msg1" {
+			WriteJSONResponse(w, MockMessageResponse("msg1", "thread1", "Subject 1", "a@ex.com", "b@ex.com", "Body 1"))
+		} else {
+			// Fail for msg2
+			WriteErrorResponse(w, http.StatusInternalServerError, "error fetching msg2")
+		}
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	result, err := repo.List(ctx, mail.ListOptions{MaxResults: 10})
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+
+	// Should still return results, with partial data for failed message
+	if len(result.Items) != 2 {
+		t.Errorf("expected 2 items, got %d", len(result.Items))
+	}
+}
+
+// TestGmailDraftRepository_ListWithPartialFailure tests draft list with some fetch failures.
+func TestGmailDraftRepository_ListWithPartialFailure(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.DraftListHandler = func(w http.ResponseWriter, r *http.Request) {
+		WriteJSONResponse(w, &gmail.ListDraftsResponse{
+			Drafts: []*gmail.Draft{
+				{Id: "draft1"},
+				{Id: "draft2"},
+			},
+			NextPageToken: "",
+		})
+	}
+
+	ts.DraftGetHandler = func(w http.ResponseWriter, r *http.Request, draftID string) {
+		if draftID == "draft1" {
+			WriteJSONResponse(w, MockDraftResponse("draft1", "msg1", "Subject", "a@ex.com", "b@ex.com", "Body"))
+		} else {
+			WriteErrorResponse(w, http.StatusInternalServerError, "error")
+		}
+	}
+
+	repo := NewGmailDraftRepository(ts.GmailRepository(t))
+	ctx := context.Background()
+
+	result, err := repo.List(ctx, mail.ListOptions{MaxResults: 10})
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+
+	// Should return results with minimal data for failed draft
+	if len(result.Items) != 2 {
+		t.Errorf("expected 2 items, got %d", len(result.Items))
+	}
+}
+
+// TestGmailMessageToDomain_HtmlOnlyBody tests message with HTML body only.
+func TestGmailMessageToDomain_HtmlOnlyBody(t *testing.T) {
+	gmailMsg := &gmail.Message{
+		Id:       "msg123",
+		ThreadId: "thread456",
+		Payload: &gmail.MessagePart{
+			MimeType: "text/html",
+			Headers: []*gmail.MessagePartHeader{
+				{Name: "From", Value: "sender@example.com"},
+				{Name: "Subject", Value: "HTML Only"},
+			},
+			Body: &gmail.MessagePartBody{
+				Data: base64.URLEncoding.EncodeToString([]byte("<p>HTML content only</p>")),
+			},
+		},
+	}
+
+	result := gmailMessageToDomain(gmailMsg)
+
+	if result.BodyHTML != "<p>HTML content only</p>" {
+		t.Errorf("BodyHTML = %q, want HTML content", result.BodyHTML)
+	}
+}
+
+// =============================================================================
+// Reply and Forward Tests
+// =============================================================================
+
+// TestGmailRepository_ReplyWithTestServer tests Reply using the TestServer.
+func TestGmailRepository_ReplyWithTestServer(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	// Original message for reply
+	originalMsg := MockMessageResponse("original123", "thread456", "Original Subject", "alice@example.com", "bob@example.com", "Original body content")
+
+	// Track the reply message
+	var sentReplyRaw string
+	var sentReplyThreadID string
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		switch msgID {
+		case "original123":
+			WriteJSONResponse(w, originalMsg)
+		case "reply_sent_123":
+			WriteJSONResponse(w, MockMessageResponse("reply_sent_123", "thread456", "Re: Original Subject", "bob@example.com", "alice@example.com", "Reply body"))
+		default:
+			WriteErrorResponse(w, http.StatusNotFound, "message not found")
+		}
+	}
+
+	ts.MessageSendHandler = func(w http.ResponseWriter, r *http.Request) {
+		var msg gmail.Message
+		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+			WriteErrorResponse(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		sentReplyRaw = msg.Raw
+		sentReplyThreadID = msg.ThreadId
+
+		WriteJSONResponse(w, &gmail.Message{
+			Id:       "reply_sent_123",
+			ThreadId: "thread456",
+			LabelIds: []string{"SENT"},
+		})
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	reply := &mail.Message{
+		From:    "bob@example.com",
+		To:      []string{"alice@example.com"},
+		Subject: "Re: Original Subject",
+		Body:    "This is my reply",
+	}
+
+	sent, err := repo.Reply(ctx, "original123", reply)
+	if err != nil {
+		t.Fatalf("Reply failed: %v", err)
+	}
+
+	if sent.ID != "reply_sent_123" {
+		t.Errorf("sent.ID = %q, want %q", sent.ID, "reply_sent_123")
+	}
+	if sent.ThreadID != "thread456" {
+		t.Errorf("sent.ThreadID = %q, want %q", sent.ThreadID, "thread456")
+	}
+	if sentReplyThreadID != "thread456" {
+		t.Errorf("sentReplyThreadID = %q, want %q", sentReplyThreadID, "thread456")
+	}
+	if sentReplyRaw == "" {
+		t.Error("expected reply raw message to be sent")
+	}
+
+	// Decode and verify the raw message contains reply headers
+	decoded, err := base64.URLEncoding.DecodeString(sentReplyRaw)
+	if err != nil {
+		t.Fatalf("failed to decode raw message: %v", err)
+	}
+	decodedStr := string(decoded)
+	if !strings.Contains(decodedStr, "In-Reply-To:") {
+		t.Error("reply message missing In-Reply-To header")
+	}
+	if !strings.Contains(decodedStr, "References:") {
+		t.Error("reply message missing References header")
+	}
+}
+
+// TestGmailRepository_ReplyOriginalNotFound tests Reply when original message doesn't exist.
+func TestGmailRepository_ReplyOriginalNotFound(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "message not found")
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	reply := &mail.Message{
+		From:    "bob@example.com",
+		To:      []string{"alice@example.com"},
+		Subject: "Re: Some Subject",
+		Body:    "Reply body",
+	}
+
+	_, err := repo.Reply(ctx, "nonexistent", reply)
+	if err == nil {
+		t.Fatal("expected error for non-existent message, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to get original message") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// TestGmailRepository_ReplySendError tests Reply when send fails.
+func TestGmailRepository_ReplySendError(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	originalMsg := MockMessageResponse("original123", "thread456", "Original Subject", "alice@example.com", "bob@example.com", "Original body")
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		if msgID == "original123" {
+			WriteJSONResponse(w, originalMsg)
+		} else {
+			WriteErrorResponse(w, http.StatusNotFound, "message not found")
+		}
+	}
+
+	ts.MessageSendHandler = func(w http.ResponseWriter, r *http.Request) {
+		WriteErrorResponse(w, http.StatusInternalServerError, "server error")
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	reply := &mail.Message{
+		From:    "bob@example.com",
+		To:      []string{"alice@example.com"},
+		Subject: "Re: Original Subject",
+		Body:    "Reply body",
+	}
+
+	_, err := repo.Reply(ctx, "original123", reply)
+	if err == nil {
+		t.Fatal("expected error when send fails, got nil")
+	}
+}
+
+// TestGmailRepository_ForwardWithTestServer tests Forward using the TestServer.
+func TestGmailRepository_ForwardWithTestServer(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	originalMsg := MockMessageResponse("original123", "thread456", "Original Subject", "alice@example.com", "bob@example.com", "Original message body")
+
+	var sentForwardRaw string
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		switch msgID {
+		case "original123":
+			WriteJSONResponse(w, originalMsg)
+		case "forward_sent_123":
+			WriteJSONResponse(w, MockMessageResponse("forward_sent_123", "thread789", "Fwd: Original Subject", "bob@example.com", "charlie@example.com", "Forwarded content"))
+		default:
+			WriteErrorResponse(w, http.StatusNotFound, "message not found")
+		}
+	}
+
+	ts.MessageSendHandler = func(w http.ResponseWriter, r *http.Request) {
+		var msg gmail.Message
+		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+			WriteErrorResponse(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		sentForwardRaw = msg.Raw
+
+		WriteJSONResponse(w, &gmail.Message{
+			Id:       "forward_sent_123",
+			ThreadId: "thread789",
+			LabelIds: []string{"SENT"},
+		})
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	forward := &mail.Message{
+		From: "bob@example.com",
+		To:   []string{"charlie@example.com"},
+		Body: "FYI - see below",
+	}
+
+	sent, err := repo.Forward(ctx, "original123", forward)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+
+	if sent.ID != "forward_sent_123" {
+		t.Errorf("sent.ID = %q, want %q", sent.ID, "forward_sent_123")
+	}
+
+	if sentForwardRaw == "" {
+		t.Error("expected forward raw message to be sent")
+	}
+
+	// Decode and verify the raw message contains forwarded content
+	decoded, err := base64.URLEncoding.DecodeString(sentForwardRaw)
+	if err != nil {
+		t.Fatalf("failed to decode raw message: %v", err)
+	}
+	decodedStr := string(decoded)
+	if !strings.Contains(decodedStr, "Forwarded message") {
+		t.Error("forward message missing Forwarded message marker")
+	}
+	if !strings.Contains(decodedStr, "Original message body") {
+		t.Error("forward message missing original body content")
+	}
+	if !strings.Contains(decodedStr, "Subject: Fwd: Original Subject") {
+		t.Error("forward message missing Fwd: prefix in subject")
+	}
+}
+
+// TestGmailRepository_ForwardWithCustomSubject tests Forward with custom subject.
+func TestGmailRepository_ForwardWithCustomSubject(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	originalMsg := MockMessageResponse("original123", "thread456", "Original Subject", "alice@example.com", "bob@example.com", "Original body")
+
+	var sentForwardRaw string
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		switch msgID {
+		case "original123":
+			WriteJSONResponse(w, originalMsg)
+		case "forward_sent_123":
+			WriteJSONResponse(w, MockMessageResponse("forward_sent_123", "thread789", "Custom Forward Subject", "bob@example.com", "charlie@example.com", "Forwarded"))
+		default:
+			WriteErrorResponse(w, http.StatusNotFound, "message not found")
+		}
+	}
+
+	ts.MessageSendHandler = func(w http.ResponseWriter, r *http.Request) {
+		var msg gmail.Message
+		json.NewDecoder(r.Body).Decode(&msg)
+		sentForwardRaw = msg.Raw
+
+		WriteJSONResponse(w, &gmail.Message{
+			Id:       "forward_sent_123",
+			ThreadId: "thread789",
+			LabelIds: []string{"SENT"},
+		})
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	forward := &mail.Message{
+		From:    "bob@example.com",
+		To:      []string{"charlie@example.com"},
+		Subject: "Custom Forward Subject", // Custom subject instead of auto-generated
+		Body:    "Check this out",
+	}
+
+	_, err := repo.Forward(ctx, "original123", forward)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+
+	// Verify custom subject was used
+	decoded, _ := base64.URLEncoding.DecodeString(sentForwardRaw)
+	if !strings.Contains(string(decoded), "Subject: Custom Forward Subject") {
+		t.Error("forward message should use custom subject")
+	}
+}
+
+// TestGmailRepository_ForwardOriginalNotFound tests Forward when original doesn't exist.
+func TestGmailRepository_ForwardOriginalNotFound(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "message not found")
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	forward := &mail.Message{
+		From: "bob@example.com",
+		To:   []string{"charlie@example.com"},
+		Body: "Forwarding",
+	}
+
+	_, err := repo.Forward(ctx, "nonexistent", forward)
+	if err == nil {
+		t.Fatal("expected error for non-existent message, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to get original message") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// TestGmailRepository_ForwardEmptyBody tests Forward with no custom body.
+func TestGmailRepository_ForwardEmptyBody(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	originalMsg := MockMessageResponse("original123", "thread456", "Original Subject", "alice@example.com", "bob@example.com", "Original body content here")
+
+	var sentForwardRaw string
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		switch msgID {
+		case "original123":
+			WriteJSONResponse(w, originalMsg)
+		case "forward_sent_123":
+			WriteJSONResponse(w, MockMessageResponse("forward_sent_123", "thread789", "Fwd: Original Subject", "bob@example.com", "charlie@example.com", ""))
+		default:
+			WriteErrorResponse(w, http.StatusNotFound, "message not found")
+		}
+	}
+
+	ts.MessageSendHandler = func(w http.ResponseWriter, r *http.Request) {
+		var msg gmail.Message
+		json.NewDecoder(r.Body).Decode(&msg)
+		sentForwardRaw = msg.Raw
+
+		WriteJSONResponse(w, &gmail.Message{
+			Id:       "forward_sent_123",
+			ThreadId: "thread789",
+			LabelIds: []string{"SENT"},
+		})
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	// Forward with empty body - should just include original message
+	forward := &mail.Message{
+		From: "bob@example.com",
+		To:   []string{"charlie@example.com"},
+		Body: "", // Empty body
+	}
+
+	_, err := repo.Forward(ctx, "original123", forward)
+	if err != nil {
+		t.Fatalf("Forward failed: %v", err)
+	}
+
+	// Verify original content is still included
+	decoded, _ := base64.URLEncoding.DecodeString(sentForwardRaw)
+	if !strings.Contains(string(decoded), "Original body content here") {
+		t.Error("forward with empty body should still include original content")
+	}
+}
+
+// TestGmailRepository_ReplyWithHTMLBody tests Reply with HTML body.
+func TestGmailRepository_ReplyWithHTMLBody(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	originalMsg := MockMessageResponse("original123", "thread456", "Original Subject", "alice@example.com", "bob@example.com", "Original body")
+
+	var sentReplyRaw string
+
+	ts.MessageGetHandler = func(w http.ResponseWriter, r *http.Request, msgID string) {
+		switch msgID {
+		case "original123":
+			WriteJSONResponse(w, originalMsg)
+		case "reply_sent_123":
+			WriteJSONResponse(w, MockMessageResponse("reply_sent_123", "thread456", "Re: Original Subject", "bob@example.com", "alice@example.com", ""))
+		default:
+			WriteErrorResponse(w, http.StatusNotFound, "message not found")
+		}
+	}
+
+	ts.MessageSendHandler = func(w http.ResponseWriter, r *http.Request) {
+		var msg gmail.Message
+		json.NewDecoder(r.Body).Decode(&msg)
+		sentReplyRaw = msg.Raw
+
+		WriteJSONResponse(w, &gmail.Message{
+			Id:       "reply_sent_123",
+			ThreadId: "thread456",
+			LabelIds: []string{"SENT"},
+		})
+	}
+
+	repo := ts.GmailRepository(t)
+	ctx := context.Background()
+
+	reply := &mail.Message{
+		From:     "bob@example.com",
+		To:       []string{"alice@example.com"},
+		Subject:  "Re: Original Subject",
+		BodyHTML: "<p>This is an <strong>HTML</strong> reply</p>",
+	}
+
+	_, err := repo.Reply(ctx, "original123", reply)
+	if err != nil {
+		t.Fatalf("Reply failed: %v", err)
+	}
+
+	decoded, _ := base64.URLEncoding.DecodeString(sentReplyRaw)
+	decodedStr := string(decoded)
+	if !strings.Contains(decodedStr, "Content-Type: text/html") {
+		t.Error("HTML reply should have text/html content type")
+	}
+	if !strings.Contains(decodedStr, "<strong>HTML</strong>") {
+		t.Error("HTML reply should contain HTML content")
 	}
 }

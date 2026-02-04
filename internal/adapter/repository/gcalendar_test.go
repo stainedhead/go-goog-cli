@@ -2217,3 +2217,271 @@ func TestGCalCalendarRepository_InvalidRequest(t *testing.T) {
 		t.Fatal("expected error for invalid update request, got nil")
 	}
 }
+
+// =============================================================================
+// RSVP Tests
+// =============================================================================
+
+// TestGCalEventRepository_RSVPWithTestServer tests RSVP (updating response status).
+func TestGCalEventRepository_RSVPWithTestServer(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	// Event with current user as attendee
+	eventWithAttendees := &gcal.Event{
+		Id:      "event123",
+		Summary: "Team Meeting",
+		Start: &gcal.EventDateTime{
+			DateTime: time.Now().Format(time.RFC3339),
+		},
+		End: &gcal.EventDateTime{
+			DateTime: time.Now().Add(time.Hour).Format(time.RFC3339),
+		},
+		Attendees: []*gcal.EventAttendee{
+			{
+				Email:          "organizer@example.com",
+				DisplayName:    "Organizer",
+				ResponseStatus: "accepted",
+				Organizer:      true,
+			},
+			{
+				Email:          "me@example.com",
+				DisplayName:    "Me",
+				ResponseStatus: "needsAction",
+				Self:           true, // This marks current user
+			},
+		},
+	}
+
+	var updatedEvent *gcal.Event
+	ts.EventGetHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		if eventID == "event123" {
+			WriteJSONResponse(w, eventWithAttendees)
+		} else {
+			WriteErrorResponse(w, http.StatusNotFound, "event not found")
+		}
+	}
+
+	ts.EventUpdateHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		if err := json.NewDecoder(r.Body).Decode(&updatedEvent); err != nil {
+			WriteErrorResponse(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		updatedEvent.Id = eventID
+		WriteJSONResponse(w, updatedEvent)
+	}
+
+	service := ts.GCalService(t)
+	repo := service.Events()
+	ctx := context.Background()
+
+	err := repo.RSVP(ctx, "primary", "event123", "accepted")
+	if err != nil {
+		t.Fatalf("RSVP failed: %v", err)
+	}
+
+	// Verify the self attendee's response was updated
+	if updatedEvent == nil {
+		t.Fatal("expected event update, got nil")
+	}
+	foundSelf := false
+	for _, attendee := range updatedEvent.Attendees {
+		if attendee.Self {
+			foundSelf = true
+			if attendee.ResponseStatus != "accepted" {
+				t.Errorf("self attendee ResponseStatus = %q, want %q", attendee.ResponseStatus, "accepted")
+			}
+		}
+	}
+	if !foundSelf {
+		t.Error("expected to find self attendee in updated event")
+	}
+}
+
+// TestGCalEventRepository_RSVPDeclined tests RSVP with declined response.
+func TestGCalEventRepository_RSVPDeclined(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	eventWithAttendees := &gcal.Event{
+		Id:      "event123",
+		Summary: "Meeting",
+		Start:   &gcal.EventDateTime{DateTime: time.Now().Format(time.RFC3339)},
+		End:     &gcal.EventDateTime{DateTime: time.Now().Add(time.Hour).Format(time.RFC3339)},
+		Attendees: []*gcal.EventAttendee{
+			{Email: "me@example.com", Self: true, ResponseStatus: "needsAction"},
+		},
+	}
+
+	var updatedEvent *gcal.Event
+	ts.EventGetHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		WriteJSONResponse(w, eventWithAttendees)
+	}
+	ts.EventUpdateHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		json.NewDecoder(r.Body).Decode(&updatedEvent)
+		WriteJSONResponse(w, updatedEvent)
+	}
+
+	service := ts.GCalService(t)
+	repo := service.Events()
+	ctx := context.Background()
+
+	err := repo.RSVP(ctx, "primary", "event123", "declined")
+	if err != nil {
+		t.Fatalf("RSVP declined failed: %v", err)
+	}
+
+	for _, attendee := range updatedEvent.Attendees {
+		if attendee.Self && attendee.ResponseStatus != "declined" {
+			t.Errorf("ResponseStatus = %q, want %q", attendee.ResponseStatus, "declined")
+		}
+	}
+}
+
+// TestGCalEventRepository_RSVPTentative tests RSVP with tentative response.
+func TestGCalEventRepository_RSVPTentative(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	eventWithAttendees := &gcal.Event{
+		Id:      "event123",
+		Summary: "Meeting",
+		Start:   &gcal.EventDateTime{DateTime: time.Now().Format(time.RFC3339)},
+		End:     &gcal.EventDateTime{DateTime: time.Now().Add(time.Hour).Format(time.RFC3339)},
+		Attendees: []*gcal.EventAttendee{
+			{Email: "me@example.com", Self: true, ResponseStatus: "needsAction"},
+		},
+	}
+
+	var updatedEvent *gcal.Event
+	ts.EventGetHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		WriteJSONResponse(w, eventWithAttendees)
+	}
+	ts.EventUpdateHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		json.NewDecoder(r.Body).Decode(&updatedEvent)
+		WriteJSONResponse(w, updatedEvent)
+	}
+
+	service := ts.GCalService(t)
+	repo := service.Events()
+	ctx := context.Background()
+
+	err := repo.RSVP(ctx, "primary", "event123", "tentative")
+	if err != nil {
+		t.Fatalf("RSVP tentative failed: %v", err)
+	}
+
+	for _, attendee := range updatedEvent.Attendees {
+		if attendee.Self && attendee.ResponseStatus != "tentative" {
+			t.Errorf("ResponseStatus = %q, want %q", attendee.ResponseStatus, "tentative")
+		}
+	}
+}
+
+// TestGCalEventRepository_RSVPInvalidResponse tests RSVP with invalid response status.
+func TestGCalEventRepository_RSVPInvalidResponse(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	service := ts.GCalService(t)
+	repo := service.Events()
+	ctx := context.Background()
+
+	err := repo.RSVP(ctx, "primary", "event123", "invalid_response")
+	if err == nil {
+		t.Fatal("expected error for invalid response status, got nil")
+	}
+	if err != ErrInvalidCalendarRequest {
+		t.Errorf("error = %v, want ErrInvalidCalendarRequest", err)
+	}
+}
+
+// TestGCalEventRepository_RSVPEventNotFound tests RSVP when event doesn't exist.
+func TestGCalEventRepository_RSVPEventNotFound(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	ts.EventGetHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		WriteErrorResponse(w, http.StatusNotFound, "event not found")
+	}
+
+	service := ts.GCalService(t)
+	repo := service.Events()
+	ctx := context.Background()
+
+	err := repo.RSVP(ctx, "primary", "nonexistent", "accepted")
+	if err == nil {
+		t.Fatal("expected error for non-existent event, got nil")
+	}
+	if err != calendar.ErrEventNotFound {
+		t.Errorf("error = %v, want ErrEventNotFound", err)
+	}
+}
+
+// TestGCalEventRepository_RSVPUpdateFails tests RSVP when update fails.
+func TestGCalEventRepository_RSVPUpdateFails(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	eventWithAttendees := &gcal.Event{
+		Id:      "event123",
+		Summary: "Meeting",
+		Start:   &gcal.EventDateTime{DateTime: time.Now().Format(time.RFC3339)},
+		End:     &gcal.EventDateTime{DateTime: time.Now().Add(time.Hour).Format(time.RFC3339)},
+		Attendees: []*gcal.EventAttendee{
+			{Email: "me@example.com", Self: true, ResponseStatus: "needsAction"},
+		},
+	}
+
+	ts.EventGetHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		WriteJSONResponse(w, eventWithAttendees)
+	}
+	ts.EventUpdateHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		WriteErrorResponse(w, http.StatusInternalServerError, "server error")
+	}
+
+	service := ts.GCalService(t)
+	repo := service.Events()
+	ctx := context.Background()
+
+	err := repo.RSVP(ctx, "primary", "event123", "accepted")
+	if err == nil {
+		t.Fatal("expected error when update fails, got nil")
+	}
+}
+
+// TestGCalEventRepository_RSVPNoSelfAttendee tests RSVP when user is not in attendees.
+func TestGCalEventRepository_RSVPNoSelfAttendee(t *testing.T) {
+	ts := NewTestServer()
+	defer ts.Close()
+
+	// Event without self attendee
+	eventWithoutSelf := &gcal.Event{
+		Id:      "event123",
+		Summary: "Meeting",
+		Start:   &gcal.EventDateTime{DateTime: time.Now().Format(time.RFC3339)},
+		End:     &gcal.EventDateTime{DateTime: time.Now().Add(time.Hour).Format(time.RFC3339)},
+		Attendees: []*gcal.EventAttendee{
+			{Email: "other@example.com", Self: false, ResponseStatus: "accepted"},
+		},
+	}
+
+	var updatedEvent *gcal.Event
+	ts.EventGetHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		WriteJSONResponse(w, eventWithoutSelf)
+	}
+	ts.EventUpdateHandler = func(w http.ResponseWriter, r *http.Request, calendarID, eventID string) {
+		json.NewDecoder(r.Body).Decode(&updatedEvent)
+		WriteJSONResponse(w, updatedEvent)
+	}
+
+	service := ts.GCalService(t)
+	repo := service.Events()
+	ctx := context.Background()
+
+	// Should succeed but not change anything
+	err := repo.RSVP(ctx, "primary", "event123", "accepted")
+	if err != nil {
+		t.Fatalf("RSVP failed: %v", err)
+	}
+}

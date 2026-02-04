@@ -580,3 +580,186 @@ func TestPlainPresenter_PipeableFriendly(t *testing.T) {
 		}
 	})
 }
+
+// =============================================================================
+// ACL Rule Tests (0% coverage improvement)
+// =============================================================================
+
+func TestPlainPresenter_RenderACLRule(t *testing.T) {
+	p := NewPlainPresenter()
+
+	t.Run("renders ACL rule as key-value pairs", func(t *testing.T) {
+		rule := &calendar.ACLRule{
+			ID:   "user:alice@example.com",
+			Role: "writer",
+			Scope: &calendar.ACLScope{
+				Type:  "user",
+				Value: "alice@example.com",
+			},
+		}
+
+		result := p.RenderACLRule(rule)
+
+		if !strings.Contains(result, "ID: user:alice@example.com") {
+			t.Error("Result should contain ID")
+		}
+		if !strings.Contains(result, "Role: writer") {
+			t.Error("Result should contain Role")
+		}
+		if !strings.Contains(result, "ScopeType: user") {
+			t.Error("Result should contain ScopeType")
+		}
+		if !strings.Contains(result, "ScopeValue: alice@example.com") {
+			t.Error("Result should contain ScopeValue")
+		}
+	})
+
+	t.Run("renders nil ACL rule as empty string", func(t *testing.T) {
+		result := p.RenderACLRule(nil)
+		if result != "" {
+			t.Errorf("Expected empty string, got %q", result)
+		}
+	})
+
+	t.Run("renders ACL rule without scope", func(t *testing.T) {
+		rule := &calendar.ACLRule{
+			ID:   "default",
+			Role: "freeBusyReader",
+		}
+
+		result := p.RenderACLRule(rule)
+
+		if !strings.Contains(result, "ID: default") {
+			t.Error("Result should contain ID")
+		}
+		if !strings.Contains(result, "Role: freeBusyReader") {
+			t.Error("Result should contain Role")
+		}
+		// Should not have scope fields since scope is nil
+		if strings.Contains(result, "ScopeType") {
+			t.Error("Result should not contain ScopeType when scope is nil")
+		}
+	})
+
+	t.Run("renders ACL rule with scope but no value", func(t *testing.T) {
+		rule := &calendar.ACLRule{
+			ID:   "default",
+			Role: "freeBusyReader",
+			Scope: &calendar.ACLScope{
+				Type: "default",
+			},
+		}
+
+		result := p.RenderACLRule(rule)
+
+		if !strings.Contains(result, "ScopeType: default") {
+			t.Error("Result should contain ScopeType")
+		}
+		// Should not have ScopeValue since it's empty
+		if strings.Contains(result, "ScopeValue:") {
+			t.Error("Result should not contain ScopeValue when value is empty")
+		}
+	})
+}
+
+func TestPlainPresenter_RenderACLRules(t *testing.T) {
+	p := NewPlainPresenter()
+
+	t.Run("renders multiple ACL rules", func(t *testing.T) {
+		rules := []*calendar.ACLRule{
+			{
+				ID:   "user:alice@example.com",
+				Role: "writer",
+				Scope: &calendar.ACLScope{
+					Type:  "user",
+					Value: "alice@example.com",
+				},
+			},
+			{
+				ID:   "domain:example.com",
+				Role: "reader",
+				Scope: &calendar.ACLScope{
+					Type:  "domain",
+					Value: "example.com",
+				},
+			},
+		}
+
+		result := p.RenderACLRules(rules)
+
+		lines := strings.Split(result, "\n")
+		if len(lines) != 2 {
+			t.Errorf("Expected 2 lines, got %d", len(lines))
+		}
+		if !strings.Contains(result, "alice@example.com") {
+			t.Error("Result should contain first rule")
+		}
+		if !strings.Contains(result, "example.com") {
+			t.Error("Result should contain second rule")
+		}
+	})
+
+	t.Run("renders empty list as empty string", func(t *testing.T) {
+		result := p.RenderACLRules([]*calendar.ACLRule{})
+		if result != "" {
+			t.Errorf("Expected empty string, got %q", result)
+		}
+	})
+
+	t.Run("renders nil list as empty string", func(t *testing.T) {
+		result := p.RenderACLRules(nil)
+		if result != "" {
+			t.Errorf("Expected empty string, got %q", result)
+		}
+	})
+
+	t.Run("skips nil rules in list", func(t *testing.T) {
+		rules := []*calendar.ACLRule{
+			{
+				ID:   "user:alice@example.com",
+				Role: "writer",
+				Scope: &calendar.ACLScope{
+					Type:  "user",
+					Value: "alice@example.com",
+				},
+			},
+			nil,
+			{
+				ID:   "user:bob@example.com",
+				Role: "reader",
+				Scope: &calendar.ACLScope{
+					Type:  "user",
+					Value: "bob@example.com",
+				},
+			},
+		}
+
+		result := p.RenderACLRules(rules)
+
+		lines := strings.Split(result, "\n")
+		if len(lines) != 2 {
+			t.Errorf("Expected 2 lines (skipping nil), got %d", len(lines))
+		}
+	})
+
+	t.Run("handles rules with nil scope", func(t *testing.T) {
+		rules := []*calendar.ACLRule{
+			{
+				ID:   "rule1",
+				Role: "reader",
+			},
+		}
+
+		result := p.RenderACLRules(rules)
+
+		// Should have empty scope fields
+		if !strings.Contains(result, "rule1") {
+			t.Error("Result should contain rule ID")
+		}
+		// Tab-separated fields should work even with empty scope
+		parts := strings.Split(result, "\t")
+		if len(parts) != 4 {
+			t.Errorf("Expected 4 tab-separated fields, got %d", len(parts))
+		}
+	})
+}

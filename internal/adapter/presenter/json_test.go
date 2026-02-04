@@ -513,3 +513,117 @@ func TestJSONPresenter_IndentFormat(t *testing.T) {
 		t.Error("JSON should be pretty-printed with newlines")
 	}
 }
+
+// =============================================================================
+// ACL Rule Tests (0% coverage improvement)
+// =============================================================================
+
+func TestJSONPresenter_RenderACLRule(t *testing.T) {
+	p := NewJSONPresenter()
+
+	t.Run("renders ACL rule as JSON", func(t *testing.T) {
+		rule := &calendar.ACLRule{
+			ID:   "user:alice@example.com",
+			Role: "writer",
+			Scope: &calendar.ACLScope{
+				Type:  "user",
+				Value: "alice@example.com",
+			},
+		}
+
+		result := p.RenderACLRule(rule)
+
+		if !json.Valid([]byte(result)) {
+			t.Error("Result is not valid JSON")
+		}
+		if !strings.Contains(result, "user:alice@example.com") {
+			t.Error("Result should contain rule ID")
+		}
+		if !strings.Contains(result, "writer") {
+			t.Error("Result should contain role")
+		}
+		if !strings.Contains(result, "alice@example.com") {
+			t.Error("Result should contain scope value")
+		}
+	})
+
+	t.Run("renders nil ACL rule", func(t *testing.T) {
+		result := p.RenderACLRule(nil)
+		if result != "null" {
+			t.Errorf("Expected 'null', got %q", result)
+		}
+	})
+
+	t.Run("renders ACL rule without scope value", func(t *testing.T) {
+		rule := &calendar.ACLRule{
+			ID:   "default",
+			Role: "freeBusyReader",
+			Scope: &calendar.ACLScope{
+				Type: "default",
+			},
+		}
+
+		result := p.RenderACLRule(rule)
+
+		if !json.Valid([]byte(result)) {
+			t.Error("Result is not valid JSON")
+		}
+		if !strings.Contains(result, "default") {
+			t.Error("Result should contain scope type")
+		}
+	})
+}
+
+func TestJSONPresenter_RenderACLRules(t *testing.T) {
+	p := NewJSONPresenter()
+
+	t.Run("renders multiple ACL rules", func(t *testing.T) {
+		rules := []*calendar.ACLRule{
+			{
+				ID:   "user:alice@example.com",
+				Role: "writer",
+				Scope: &calendar.ACLScope{
+					Type:  "user",
+					Value: "alice@example.com",
+				},
+			},
+			{
+				ID:   "domain:example.com",
+				Role: "reader",
+				Scope: &calendar.ACLScope{
+					Type:  "domain",
+					Value: "example.com",
+				},
+			},
+		}
+
+		result := p.RenderACLRules(rules)
+
+		if !json.Valid([]byte(result)) {
+			t.Error("Result is not valid JSON")
+		}
+		if !strings.HasPrefix(result, "[") {
+			t.Error("Result should be a JSON array")
+		}
+		if !strings.Contains(result, "alice@example.com") {
+			t.Error("Result should contain first rule")
+		}
+		if !strings.Contains(result, "example.com") {
+			t.Error("Result should contain second rule")
+		}
+	})
+
+	t.Run("renders empty list", func(t *testing.T) {
+		result := p.RenderACLRules([]*calendar.ACLRule{})
+		if result != "[]" {
+			t.Errorf("Expected '[]', got %q", result)
+		}
+	})
+
+	t.Run("renders nil list", func(t *testing.T) {
+		result := p.RenderACLRules(nil)
+		if result != "[]" {
+			t.Errorf("Expected '[]', got %q", result)
+		}
+	})
+}

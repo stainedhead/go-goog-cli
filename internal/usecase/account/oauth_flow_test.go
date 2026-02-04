@@ -542,3 +542,207 @@ func TestMockTokenSource(t *testing.T) {
 		t.Error("expected error")
 	}
 }
+
+// TestDefaultBrowserOpener_Open tests the DefaultBrowserOpener (cannot actually open browser in test).
+func TestDefaultBrowserOpener_Open(t *testing.T) {
+	// We can't test actually opening a browser in automated tests
+	// but we can verify the type implements the interface
+	opener := &DefaultBrowserOpener{}
+	var _ BrowserOpener = opener
+}
+
+// TestDefaultPKCEGenerator_GenerateVerifier tests the PKCE verifier generation.
+func TestDefaultPKCEGenerator_GenerateVerifier(t *testing.T) {
+	generator := &DefaultPKCEGenerator{}
+	verifier := generator.GenerateVerifier()
+
+	// Verifier should be a non-empty string
+	if verifier == "" {
+		t.Error("expected non-empty verifier")
+	}
+
+	// Verifier should be 43-128 characters (standard PKCE requirement)
+	if len(verifier) < 43 || len(verifier) > 128 {
+		t.Errorf("verifier length %d outside valid range [43, 128]", len(verifier))
+	}
+}
+
+// TestDefaultPKCEGenerator_GenerateChallenge tests the PKCE challenge generation.
+func TestDefaultPKCEGenerator_GenerateChallenge(t *testing.T) {
+	generator := &DefaultPKCEGenerator{}
+	verifier := generator.GenerateVerifier()
+	challenge := generator.GenerateChallenge(verifier)
+
+	// Challenge should be a non-empty string
+	if challenge == "" {
+		t.Error("expected non-empty challenge")
+	}
+
+	// Challenge should be URL-safe base64 encoded SHA256 (43 chars)
+	if len(challenge) != 43 {
+		t.Errorf("challenge length %d, expected 43", len(challenge))
+	}
+}
+
+// TestDefaultPKCEGenerator_ConsistentChallenge tests that the same verifier produces the same challenge.
+func TestDefaultPKCEGenerator_ConsistentChallenge(t *testing.T) {
+	generator := &DefaultPKCEGenerator{}
+	verifier := "test-verifier-12345678901234567890123456789012"
+
+	challenge1 := generator.GenerateChallenge(verifier)
+	challenge2 := generator.GenerateChallenge(verifier)
+
+	if challenge1 != challenge2 {
+		t.Errorf("same verifier should produce same challenge: %q != %q", challenge1, challenge2)
+	}
+}
+
+// TestDefaultOAuthProvider_NewDefaultOAuthProvider tests creating a new OAuth provider.
+func TestDefaultOAuthProvider_NewDefaultOAuthProvider(t *testing.T) {
+	scopes := []string{"openid", "email"}
+	provider := NewDefaultOAuthProvider(scopes)
+
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+	if provider.config == nil {
+		t.Error("expected non-nil config")
+	}
+}
+
+// TestDefaultOAuthProvider_GetRedirectURL tests getting the redirect URL.
+func TestDefaultOAuthProvider_GetRedirectURL(t *testing.T) {
+	provider := NewDefaultOAuthProvider([]string{"openid"})
+	url := provider.GetRedirectURL()
+
+	// Default config should have a redirect URL
+	if url == "" {
+		t.Error("expected non-empty redirect URL")
+	}
+}
+
+// TestDefaultOAuthProvider_SetRedirectURL tests setting the redirect URL.
+func TestDefaultOAuthProvider_SetRedirectURL(t *testing.T) {
+	provider := NewDefaultOAuthProvider([]string{"openid"})
+	newURL := "http://localhost:12345/callback"
+
+	provider.SetRedirectURL(newURL)
+	result := provider.GetRedirectURL()
+
+	if result != newURL {
+		t.Errorf("expected redirect URL %q, got %q", newURL, result)
+	}
+}
+
+// TestDefaultOAuthProvider_Validate tests validation (will fail without credentials).
+func TestDefaultOAuthProvider_Validate(t *testing.T) {
+	provider := NewDefaultOAuthProvider([]string{"openid"})
+
+	// Validate may return an error if client ID/secret are not configured
+	// We just verify it doesn't panic
+	_ = provider.Validate()
+}
+
+// TestDefaultOAuthProvider_GetAuthURL tests generating an auth URL.
+func TestDefaultOAuthProvider_GetAuthURL(t *testing.T) {
+	provider := NewDefaultOAuthProvider([]string{"openid"})
+	url := provider.GetAuthURL("test-state", "test-challenge")
+
+	if url == "" {
+		t.Error("expected non-empty auth URL")
+	}
+
+	// URL should contain state parameter
+	if !containsStr(url, "state=test-state") {
+		t.Errorf("auth URL should contain state parameter: %s", url)
+	}
+
+	// URL should contain code challenge
+	if !containsStr(url, "code_challenge=test-challenge") {
+		t.Errorf("auth URL should contain code challenge: %s", url)
+	}
+}
+
+// TestDefaultOAuthProvider_TokenSource tests getting a token source.
+func TestDefaultOAuthProvider_TokenSource(t *testing.T) {
+	provider := NewDefaultOAuthProvider([]string{"openid"})
+	token := &oauth2.Token{
+		AccessToken:  "test-token",
+		RefreshToken: "test-refresh",
+		Expiry:       time.Now().Add(time.Hour),
+	}
+
+	ts := provider.TokenSource(context.Background(), token)
+	if ts == nil {
+		t.Error("expected non-nil token source")
+	}
+}
+
+// TestDefaultCallbackServer_NilServerGetServerURL tests GetServerURL when server is nil.
+func TestDefaultCallbackServer_NilServerGetServerURL(t *testing.T) {
+	server := &DefaultCallbackServer{}
+	url := server.GetServerURL()
+
+	if url != "" {
+		t.Errorf("expected empty URL for nil server, got %q", url)
+	}
+}
+
+// TestDefaultCallbackServer_Stop_Idempotent tests that Stop can be called multiple times.
+func TestDefaultCallbackServer_Stop_Idempotent(t *testing.T) {
+	server := &DefaultCallbackServer{}
+
+	// Should not error even when server wasn't started
+	err := server.Stop()
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+
+	// Should not error on second call
+	err = server.Stop()
+	if err != nil {
+		t.Errorf("expected nil error on second stop, got %v", err)
+	}
+}
+
+// TestDefaultUserInfoFetcher_GetUserEmail_WithNilClient tests that nil client gets default.
+func TestDefaultUserInfoFetcher_GetUserEmail_WithNilClient(t *testing.T) {
+	fetcher := NewDefaultUserInfoFetcher(nil)
+
+	// Verify client is set to default
+	if fetcher.client == nil {
+		t.Error("expected default client to be set")
+	}
+}
+
+// TestDefaultOAuthFlow_Run_WithNilProvider tests that nil provider gets default.
+func TestDefaultOAuthFlow_Run_WithNilProvider(t *testing.T) {
+	// Create flow without provider - it should create one internally
+	flow := NewDefaultOAuthFlowWithConfig(OAuthFlowConfig{
+		BrowserOpener: &MockBrowserOpener{},
+		CallbackServer: &MockCallbackServer{
+			StartErr: errors.New("test error"), // Stop early
+		},
+		PKCEGenerator: &MockPKCEGenerator{
+			Verifier:  "test-verifier",
+			Challenge: "test-challenge",
+		},
+	})
+
+	// The flow will fail when trying to start the callback server
+	// but it should have created a default provider
+	_, _, err := flow.Run(context.Background(), []string{"openid"})
+	if err == nil {
+		t.Error("expected error from callback server start")
+	}
+}
+
+// Helper function
+func containsStr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

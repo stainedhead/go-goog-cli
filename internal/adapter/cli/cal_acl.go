@@ -89,7 +89,13 @@ Requires --confirm flag for safety.`,
   goog cal acl remove "mywork@group.calendar.google.com" "user:colleague@example.com" --confirm`,
 	Aliases: []string{"rm", "delete"},
 	Args:    cobra.ExactArgs(2),
-	RunE:    runACLRemove,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if !aclConfirm {
+			return fmt.Errorf("removal requires --confirm flag")
+		}
+		return nil
+	},
+	RunE: runACLRemove,
 }
 
 // shareCmd is a user-friendly alias for acl add.

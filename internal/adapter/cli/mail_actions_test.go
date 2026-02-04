@@ -2240,3 +2240,335 @@ func TestRunMailSearch_JSONFormat(t *testing.T) {
 		t.Errorf("expected JSON output to contain subject, got: %s", output)
 	}
 }
+
+// =============================================================================
+// Tests for mail move command
+// =============================================================================
+
+func TestMailMoveCmd_Help(t *testing.T) {
+	cmd := &cobra.Command{Use: "goog"}
+	cmd.AddCommand(mailCmd)
+
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"mail", "move", "--help"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "move") {
+		t.Error("expected output to contain 'move'")
+	}
+	if !contains(output, "--to") {
+		t.Error("expected output to contain '--to'")
+	}
+	if !contains(output, "label") {
+		t.Error("expected output to contain 'label'")
+	}
+}
+
+func TestMailMoveCmd_HasArgsRequirement(t *testing.T) {
+	if mailMoveCmd.Args == nil {
+		t.Error("mailMoveCmd should have Args validator defined")
+	}
+}
+
+func TestMailMoveCmd_HasToFlag(t *testing.T) {
+	flag := mailMoveCmd.Flag("to")
+	if flag == nil {
+		t.Error("expected --to flag to be defined on move command")
+	}
+}
+
+func TestMailMoveCmd_RequiresToFlag(t *testing.T) {
+	origDestination := mailMoveDestination
+	mailMoveDestination = ""
+	defer func() { mailMoveDestination = origDestination }()
+
+	mockCmd := &cobra.Command{Use: "test"}
+	mockCmd.SetOut(new(bytes.Buffer))
+	mockCmd.SetErr(new(bytes.Buffer))
+
+	if mailMoveCmd.PreRunE != nil {
+		err := mailMoveCmd.PreRunE(mockCmd, []string{"msg123"})
+		if err == nil {
+			t.Error("expected error when --to flag is not set")
+		}
+	} else {
+		t.Error("mailMoveCmd should have PreRunE defined")
+	}
+}
+
+func TestMailMoveCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		expectErr bool
+	}{
+		{
+			name:      "no args",
+			args:      []string{},
+			expectErr: true,
+		},
+		{
+			name:      "one arg",
+			args:      []string{"msg123"},
+			expectErr: false,
+		},
+		{
+			name:      "too many args",
+			args:      []string{"msg123", "extra"},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := mailMoveCmd.Args(mailMoveCmd, tt.args)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailMoveCmd_ToFlagValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		destination string
+		expectErr   bool
+	}{
+		{
+			name:        "with destination",
+			destination: "IMPORTANT",
+			expectErr:   false,
+		},
+		{
+			name:        "empty destination",
+			destination: "",
+			expectErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origDestination := mailMoveDestination
+			mailMoveDestination = tt.destination
+			defer func() { mailMoveDestination = origDestination }()
+
+			mockCmd := &cobra.Command{Use: "test"}
+			mockCmd.SetOut(new(bytes.Buffer))
+			mockCmd.SetErr(new(bytes.Buffer))
+
+			err := mailMoveCmd.PreRunE(mockCmd, []string{"msg123"})
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestRunMailMove_WithMockDependencies(t *testing.T) {
+	mockMessage := &mail.Message{
+		ID:     "msg123",
+		Labels: []string{"IMPORTANT"},
+	}
+	mockRepo := &MockMessageRepository{
+		ModifyResult: mockMessage,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origDestination := mailMoveDestination
+	quietFlag = false
+	mailMoveDestination = "IMPORTANT"
+	defer func() {
+		quietFlag = origQuiet
+		mailMoveDestination = origDestination
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMove(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailMove failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg123") || !contains(output, "moved") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+	if !contains(output, "IMPORTANT") {
+		t.Errorf("expected output to contain destination label, got: %s", output)
+	}
+}
+
+func TestRunMailMove_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		ModifyErr: fmt.Errorf("move operation failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origDestination := mailMoveDestination
+	mailMoveDestination = "IMPORTANT"
+	defer func() { mailMoveDestination = origDestination }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMove(cmd, []string{"msg123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to move message") {
+		t.Errorf("expected error to contain 'failed to move message', got: %v", err)
+	}
+}
+
+func TestRunMailMove_QuietMode(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origDestination := mailMoveDestination
+	quietFlag = true
+	mailMoveDestination = "IMPORTANT"
+	defer func() {
+		quietFlag = origQuiet
+		mailMoveDestination = origDestination
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMove(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailMove failed: %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Errorf("quiet mode should not produce output, got: %s", output)
+	}
+}
+
+func TestRunMailMove_VerboseMode(t *testing.T) {
+	mockMessage := &mail.Message{
+		ID:     "msg123",
+		Labels: []string{"IMPORTANT", "STARRED"},
+	}
+	mockRepo := &MockMessageRepository{
+		ModifyResult: mockMessage,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origVerbose := verboseFlag
+	origDestination := mailMoveDestination
+	quietFlag = false
+	verboseFlag = true
+	mailMoveDestination = "IMPORTANT"
+	defer func() {
+		quietFlag = origQuiet
+		verboseFlag = origVerbose
+		mailMoveDestination = origDestination
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMove(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailMove failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "labels") {
+		t.Errorf("expected verbose output to contain label information, got: %s", output)
+	}
+}
+
+// TestMailCmd_MoveSubcommandRegistered verifies the move subcommand is registered.
+func TestMailCmd_MoveSubcommandRegistered(t *testing.T) {
+	found := false
+	for _, sub := range mailCmd.Commands() {
+		if sub.Name() == "move" {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Error("expected subcommand 'move' to be registered with mailCmd")
+	}
+}

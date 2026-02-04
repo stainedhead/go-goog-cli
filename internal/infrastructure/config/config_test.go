@@ -2291,6 +2291,566 @@ func TestMultipleAccountsInConfig(t *testing.T) {
 	}
 }
 
+// TestStringToTimeHookFuncNonStringType tests that non-string types pass through unchanged.
+func TestStringToTimeHookFuncNonStringType(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Setenv("GOOG_CONFIG", configPath)
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	origAccount := os.Getenv("GOOG_ACCOUNT")
+	origFormat := os.Getenv("GOOG_FORMAT")
+	os.Unsetenv("GOOG_ACCOUNT")
+	os.Unsetenv("GOOG_FORMAT")
+	defer func() {
+		restoreEnv("GOOG_ACCOUNT", origAccount)
+		restoreEnv("GOOG_FORMAT", origFormat)
+	}()
+
+	// Config with an integer value for a non-time field - should pass through
+	configContent := `default_account: "test@example.com"
+default_format: "json"
+mail:
+  page_size: 50
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Mail.PageSize != 50 {
+		t.Errorf("expected page_size 50, got %d", cfg.Mail.PageSize)
+	}
+}
+
+// TestStringToTimeHookFuncNonTimeTarget tests that non-time targets pass through unchanged.
+func TestStringToTimeHookFuncNonTimeTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Setenv("GOOG_CONFIG", configPath)
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	origAccount := os.Getenv("GOOG_ACCOUNT")
+	origFormat := os.Getenv("GOOG_FORMAT")
+	os.Unsetenv("GOOG_ACCOUNT")
+	os.Unsetenv("GOOG_FORMAT")
+	defer func() {
+		restoreEnv("GOOG_ACCOUNT", origAccount)
+		restoreEnv("GOOG_FORMAT", origFormat)
+	}()
+
+	// Test that string to string passes through (not converted to time)
+	configContent := `default_account: "2024-01-15T10:30:00Z"
+default_format: "json"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// The date-like string should be kept as string since DefaultAccount is a string
+	if cfg.DefaultAccount != "2024-01-15T10:30:00Z" {
+		t.Errorf("expected default_account '2024-01-15T10:30:00Z', got %q", cfg.DefaultAccount)
+	}
+}
+
+// TestWriteConfigSecurelyWriteError tests write error handling.
+func TestWriteConfigSecurelyWriteError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Setenv("GOOG_CONFIG", configPath)
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	// Create a config and save it successfully first
+	cfg := NewConfig()
+	cfg.DefaultAccount = "test@example.com"
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("first save failed: %v", err)
+	}
+
+	// Make the file read-only
+	if err := os.Chmod(configPath, 0400); err != nil {
+		t.Fatalf("failed to change permissions: %v", err)
+	}
+	defer os.Chmod(configPath, 0600) // Restore for cleanup
+
+	// Try to save again - should fail
+	cfg.DefaultAccount = "another@example.com"
+	err := cfg.Save()
+	if err == nil {
+		t.Error("expected error when writing to read-only file")
+	}
+}
+
+// TestGetConfigPathWindowsWithAPPDATA tests Windows path with APPDATA set.
+func TestGetConfigPathWindowsWithAPPDATA(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific test")
+	}
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	origAppData := os.Getenv("APPDATA")
+	os.Unsetenv("GOOG_CONFIG")
+	os.Setenv("APPDATA", "C:\\Users\\Test\\AppData\\Roaming")
+	defer func() {
+		restoreEnv("GOOG_CONFIG", origConfig)
+		restoreEnv("APPDATA", origAppData)
+	}()
+
+	path := GetConfigPath()
+	if !contains(path, "C:\\Users\\Test\\AppData\\Roaming\\goog") {
+		t.Errorf("expected path to contain APPDATA\\goog, got %q", path)
+	}
+}
+
+// TestSetValueUnknownKey tests SetValue with an unknown key.
+func TestSetValueUnknownKey(t *testing.T) {
+	cfg := NewConfig()
+
+	err := cfg.SetValue("invalid.nested.key", "value")
+	if err == nil {
+		t.Error("expected error for unknown key")
+	}
+	if !contains(err.Error(), "unknown config key") {
+		t.Errorf("expected 'unknown config key' error, got %v", err)
+	}
+}
+
+// TestGetValueUnknownKey tests GetValue with an unknown key.
+func TestGetValueUnknownKey(t *testing.T) {
+	cfg := NewConfig()
+
+	_, err := cfg.GetValue("invalid.nested.key")
+	if err == nil {
+		t.Error("expected error for unknown key")
+	}
+	if !contains(err.Error(), "unknown config key") {
+		t.Errorf("expected 'unknown config key' error, got %v", err)
+	}
+}
+
+// TestWriteConfigSecurelyCloseError tests handling when file close fails.
+func TestWriteConfigSecurelyFileOperations(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "test-close.yaml")
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Setenv("GOOG_CONFIG", configPath)
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	cfg := NewConfig()
+	cfg.DefaultAccount = "test@example.com"
+	cfg.Mail.PageSize = 100
+
+	// Normal save should work
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Read the file to verify content
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	if !contains(string(data), "test@example.com") {
+		t.Error("config should contain the email")
+	}
+}
+
+// TestWriteConfigSecurelyOnWindows simulates Windows behavior.
+func TestWriteConfigSecurelyOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific test")
+	}
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "windows-test.yaml")
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Setenv("GOOG_CONFIG", configPath)
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	cfg := NewConfig()
+	cfg.DefaultAccount = "win@example.com"
+
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Verify file was created
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Error("config file should have been created")
+	}
+
+	// Verify content
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+
+	if !contains(string(data), "win@example.com") {
+		t.Error("file should contain saved account")
+	}
+}
+
+// TestGetConfigPathLinuxNoXDG tests Linux path when XDG_CONFIG_HOME is not set.
+func TestGetConfigPathLinuxNoXDG(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-specific test")
+	}
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	origXDG := os.Getenv("XDG_CONFIG_HOME")
+	os.Unsetenv("GOOG_CONFIG")
+	os.Unsetenv("XDG_CONFIG_HOME")
+	defer func() {
+		restoreEnv("GOOG_CONFIG", origConfig)
+		restoreEnv("XDG_CONFIG_HOME", origXDG)
+	}()
+
+	path := GetConfigPath()
+
+	// Should fallback to ~/.config/goog
+	if !contains(path, ".config/goog") {
+		t.Errorf("expected path to contain '.config/goog', got %q", path)
+	}
+}
+
+// TestLoadFailsOnInvalidDirectory tests that Load fails when config directory cannot be created.
+func TestLoadFailsOnInvalidDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	// Use a path under /dev/null which cannot have subdirectories
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Setenv("GOOG_CONFIG", "/dev/null/subdir/config.yaml")
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	origAccount := os.Getenv("GOOG_ACCOUNT")
+	origFormat := os.Getenv("GOOG_FORMAT")
+	os.Unsetenv("GOOG_ACCOUNT")
+	os.Unsetenv("GOOG_FORMAT")
+	defer func() {
+		restoreEnv("GOOG_ACCOUNT", origAccount)
+		restoreEnv("GOOG_FORMAT", origFormat)
+	}()
+
+	_, err := Load()
+	if err == nil {
+		t.Error("expected error when directory cannot be created")
+	}
+}
+
+// TestSaveFailsOnInvalidDirectory tests that Save fails when config directory cannot be created.
+func TestSaveFailsOnInvalidDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-specific test")
+	}
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Setenv("GOOG_CONFIG", "/dev/null/subdir/config.yaml")
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	cfg := NewConfig()
+	err := cfg.Save()
+	if err == nil {
+		t.Error("expected error when directory cannot be created")
+	}
+}
+
+// TestSetValueTimezoneLocal tests setting timezone to "Local".
+func TestSetValueTimezoneLocal(t *testing.T) {
+	cfg := NewConfig()
+
+	err := cfg.SetValue("timezone", "Local")
+	if err != nil {
+		t.Errorf("unexpected error setting timezone to Local: %v", err)
+	}
+	if cfg.Timezone != "Local" {
+		t.Errorf("expected timezone 'Local', got %q", cfg.Timezone)
+	}
+}
+
+// TestSetValueTimezoneEmpty tests setting timezone to empty string.
+func TestSetValueTimezoneEmpty(t *testing.T) {
+	cfg := NewConfig()
+
+	err := cfg.SetValue("timezone", "")
+	if err != nil {
+		t.Errorf("unexpected error setting empty timezone: %v", err)
+	}
+	if cfg.Timezone != "" {
+		t.Errorf("expected empty timezone, got %q", cfg.Timezone)
+	}
+}
+
+// TestAccountConfigFields tests AccountConfig field access.
+func TestAccountConfigFields(t *testing.T) {
+	cfg := NewConfig()
+	addedAt := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+
+	cfg.Accounts["test"] = AccountConfig{
+		Email:   "test@example.com",
+		Scopes:  []string{"gmail.readonly", "calendar.events"},
+		AddedAt: addedAt,
+	}
+
+	acc, err := cfg.GetAccount("test")
+	if err != nil {
+		t.Fatalf("GetAccount failed: %v", err)
+	}
+
+	if acc.Email != "test@example.com" {
+		t.Errorf("expected email 'test@example.com', got %q", acc.Email)
+	}
+	if len(acc.Scopes) != 2 {
+		t.Errorf("expected 2 scopes, got %d", len(acc.Scopes))
+	}
+	if !acc.AddedAt.Equal(addedAt) {
+		t.Errorf("expected AddedAt %v, got %v", addedAt, acc.AddedAt)
+	}
+}
+
+// TestMailConfigFields tests MailConfig field access.
+func TestMailConfigFields(t *testing.T) {
+	cfg := NewConfig()
+
+	// Test defaults
+	if cfg.Mail.DefaultLabel != "INBOX" {
+		t.Errorf("expected default label 'INBOX', got %q", cfg.Mail.DefaultLabel)
+	}
+	if cfg.Mail.PageSize != 20 {
+		t.Errorf("expected page size 20, got %d", cfg.Mail.PageSize)
+	}
+
+	// Test modification
+	cfg.Mail.DefaultLabel = "SENT"
+	cfg.Mail.PageSize = 50
+
+	if cfg.Mail.DefaultLabel != "SENT" {
+		t.Errorf("expected label 'SENT', got %q", cfg.Mail.DefaultLabel)
+	}
+	if cfg.Mail.PageSize != 50 {
+		t.Errorf("expected page size 50, got %d", cfg.Mail.PageSize)
+	}
+}
+
+// TestCalendarConfigFields tests CalendarConfig field access.
+func TestCalendarConfigFields(t *testing.T) {
+	cfg := NewConfig()
+
+	// Test defaults
+	if cfg.Calendar.DefaultCalendar != "primary" {
+		t.Errorf("expected default calendar 'primary', got %q", cfg.Calendar.DefaultCalendar)
+	}
+	if cfg.Calendar.WeekStart != "sunday" {
+		t.Errorf("expected week start 'sunday', got %q", cfg.Calendar.WeekStart)
+	}
+
+	// Test modification
+	cfg.Calendar.DefaultCalendar = "work"
+	cfg.Calendar.WeekStart = "monday"
+
+	if cfg.Calendar.DefaultCalendar != "work" {
+		t.Errorf("expected calendar 'work', got %q", cfg.Calendar.DefaultCalendar)
+	}
+	if cfg.Calendar.WeekStart != "monday" {
+		t.Errorf("expected week start 'monday', got %q", cfg.Calendar.WeekStart)
+	}
+}
+
+// TestGetConfigPathPlatformSpecificFallbacks tests GetConfigPath fallbacks.
+func TestGetConfigPathPlatformSpecificFallbacks(t *testing.T) {
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Unsetenv("GOOG_CONFIG")
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	path := GetConfigPath()
+
+	// Verify path is not empty
+	if path == "" {
+		t.Error("GetConfigPath returned empty path")
+	}
+
+	// Verify path ends with config.yaml
+	if filepath.Base(path) != "config.yaml" {
+		t.Errorf("path should end with 'config.yaml', got %q", filepath.Base(path))
+	}
+
+	// Verify path contains goog directory
+	if filepath.Base(filepath.Dir(path)) != "goog" {
+		t.Errorf("path should contain 'goog' directory, got %q", path)
+	}
+}
+
+// TestLoadWithMalformedConfig tests loading a malformed config file.
+func TestLoadWithMalformedConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Setenv("GOOG_CONFIG", configPath)
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	origAccount := os.Getenv("GOOG_ACCOUNT")
+	origFormat := os.Getenv("GOOG_FORMAT")
+	os.Unsetenv("GOOG_ACCOUNT")
+	os.Unsetenv("GOOG_FORMAT")
+	defer func() {
+		restoreEnv("GOOG_ACCOUNT", origAccount)
+		restoreEnv("GOOG_FORMAT", origFormat)
+	}()
+
+	// Write malformed YAML (unbalanced brackets)
+	malformedContent := `default_account: "test@example.com"
+accounts:
+  test:
+    - missing: [bracket
+`
+	if err := os.WriteFile(configPath, []byte(malformedContent), 0600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Error("expected error for malformed YAML")
+	}
+}
+
+// TestConfigSaveWithSpecialCharacters tests saving config with special characters.
+func TestConfigSaveWithSpecialCharacters(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	origConfig := os.Getenv("GOOG_CONFIG")
+	os.Setenv("GOOG_CONFIG", configPath)
+	defer restoreEnv("GOOG_CONFIG", origConfig)
+
+	cfg := NewConfig()
+	cfg.DefaultAccount = "test+special@example.com"
+	cfg.Mail.DefaultLabel = "Label with spaces & symbols!"
+
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Reload and verify
+	origAccount := os.Getenv("GOOG_ACCOUNT")
+	origFormat := os.Getenv("GOOG_FORMAT")
+	os.Unsetenv("GOOG_ACCOUNT")
+	os.Unsetenv("GOOG_FORMAT")
+	defer func() {
+		restoreEnv("GOOG_ACCOUNT", origAccount)
+		restoreEnv("GOOG_FORMAT", origFormat)
+	}()
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if loaded.DefaultAccount != "test+special@example.com" {
+		t.Errorf("expected account 'test+special@example.com', got %q", loaded.DefaultAccount)
+	}
+	if loaded.Mail.DefaultLabel != "Label with spaces & symbols!" {
+		t.Errorf("expected label 'Label with spaces & symbols!', got %q", loaded.Mail.DefaultLabel)
+	}
+}
+
+// TestLoadWithEnvOverridesAndExistingConfig tests env overrides with existing config.
+func TestLoadWithEnvOverridesAndExistingConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	// Save all env vars
+	origConfig := os.Getenv("GOOG_CONFIG")
+	origAccount := os.Getenv("GOOG_ACCOUNT")
+	origFormat := os.Getenv("GOOG_FORMAT")
+
+	defer func() {
+		restoreEnv("GOOG_CONFIG", origConfig)
+		restoreEnv("GOOG_ACCOUNT", origAccount)
+		restoreEnv("GOOG_FORMAT", origFormat)
+	}()
+
+	// Create config file
+	configContent := `default_account: "file@example.com"
+default_format: "table"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	// Set env vars to override
+	os.Setenv("GOOG_CONFIG", configPath)
+	os.Setenv("GOOG_ACCOUNT", "env@example.com")
+	os.Setenv("GOOG_FORMAT", "json")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Env vars should override file values
+	if cfg.DefaultAccount != "env@example.com" {
+		t.Errorf("expected GOOG_ACCOUNT override, got %q", cfg.DefaultAccount)
+	}
+	if cfg.DefaultFormat != "json" {
+		t.Errorf("expected GOOG_FORMAT override, got %q", cfg.DefaultFormat)
+	}
+}
+
+// TestSetValuePageSizeZero tests setting page_size to zero.
+func TestSetValuePageSizeZero(t *testing.T) {
+	cfg := NewConfig()
+
+	err := cfg.SetValue("mail.page_size", "0")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if cfg.Mail.PageSize != 0 {
+		t.Errorf("expected page size 0, got %d", cfg.Mail.PageSize)
+	}
+}
+
+// TestSetValuePageSizeNegative tests setting page_size to negative value.
+func TestSetValuePageSizeNegative(t *testing.T) {
+	cfg := NewConfig()
+
+	err := cfg.SetValue("mail.page_size", "-10")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	// Negative values are parsed but may not be valid semantically
+	if cfg.Mail.PageSize != -10 {
+		t.Errorf("expected page size -10, got %d", cfg.Mail.PageSize)
+	}
+}
+
 // TestConfigFullRoundTrip tests complete save/load cycle with all fields.
 func TestConfigFullRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()

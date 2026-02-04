@@ -14,10 +14,11 @@ import (
 
 // Thread command flags.
 var (
-	threadMaxResults   int
-	threadLabels       []string
-	threadAddLabels    []string
-	threadRemoveLabels []string
+	threadMaxResults    int
+	threadLabels        []string
+	threadAddLabels     []string
+	threadRemoveLabels  []string
+	threadDeleteConfirm bool
 )
 
 // threadCmd represents the thread command group.
@@ -112,11 +113,51 @@ using the --add-labels and --remove-labels flags.`,
 	RunE: runThreadModify,
 }
 
+// threadUntrashCmd restores a thread from trash.
+var threadUntrashCmd = &cobra.Command{
+	Use:   "untrash <id>",
+	Short: "Restore thread from trash",
+	Long: `Restore a thread from the trash folder.
+
+All messages in the thread will be removed from trash and
+restored to their previous labels.`,
+	Example: `  # Restore a thread from trash
+  goog thread untrash abc123`,
+	Args: cobra.ExactArgs(1),
+	RunE: runThreadUntrash,
+}
+
+// threadDeleteCmd permanently deletes a thread.
+var threadDeleteCmd = &cobra.Command{
+	Use:   "delete <id>",
+	Short: "Permanently delete a thread",
+	Long: `Permanently delete an entire thread.
+
+WARNING: This action is irreversible. All messages in the thread
+will be permanently deleted and cannot be recovered.
+
+The --confirm flag is required to prevent accidental deletion.`,
+	Example: `  # Permanently delete a thread (requires --confirm)
+  goog thread delete abc123 --confirm`,
+	Args: cobra.ExactArgs(1),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if !threadDeleteConfirm {
+			cmd.PrintErrln("Error: permanent deletion requires --confirm flag")
+			cmd.PrintErrln("This action is irreversible. Use 'goog thread trash' for recoverable deletion.")
+			return fmt.Errorf("--confirm flag required for permanent deletion")
+		}
+		return nil
+	},
+	RunE: runThreadDelete,
+}
+
 func init() {
 	// Add thread subcommands
 	threadCmd.AddCommand(threadListCmd)
 	threadCmd.AddCommand(threadShowCmd)
 	threadCmd.AddCommand(threadTrashCmd)
+	threadCmd.AddCommand(threadUntrashCmd)
+	threadCmd.AddCommand(threadDeleteCmd)
 	threadCmd.AddCommand(threadModifyCmd)
 
 	// List flags
@@ -126,6 +167,9 @@ func init() {
 	// Modify flags
 	threadModifyCmd.Flags().StringSliceVar(&threadAddLabels, "add-labels", nil, "labels to add")
 	threadModifyCmd.Flags().StringSliceVar(&threadRemoveLabels, "remove-labels", nil, "labels to remove")
+
+	// Delete flags
+	threadDeleteCmd.Flags().BoolVar(&threadDeleteConfirm, "confirm", false, "confirm permanent deletion")
 
 	// Add to root
 	rootCmd.AddCommand(threadCmd)
@@ -271,6 +315,48 @@ func runThreadModify(cmd *cobra.Command, args []string) error {
 		if len(threadRemoveLabels) > 0 {
 			cmd.Printf("Removed labels: %s\n", strings.Join(threadRemoveLabels, ", "))
 		}
+	}
+
+	return nil
+}
+
+// runThreadUntrash handles the thread untrash command.
+func runThreadUntrash(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	threadID := args[0]
+
+	repo, err := getThreadRepositoryFromDeps(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := repo.Untrash(ctx, threadID); err != nil {
+		return fmt.Errorf("failed to restore thread from trash: %w", err)
+	}
+
+	if !quietFlag {
+		cmd.Printf("Thread %s restored from trash.\n", threadID)
+	}
+
+	return nil
+}
+
+// runThreadDelete handles the thread delete command.
+func runThreadDelete(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	threadID := args[0]
+
+	repo, err := getThreadRepositoryFromDeps(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := repo.Delete(ctx, threadID); err != nil {
+		return fmt.Errorf("failed to delete thread: %w", err)
+	}
+
+	if !quietFlag {
+		cmd.Printf("Thread %s permanently deleted.\n", threadID)
 	}
 
 	return nil
