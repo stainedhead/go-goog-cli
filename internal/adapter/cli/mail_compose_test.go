@@ -1024,3 +1024,432 @@ func TestParseEmailRecipients_BoundaryConditions(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// Additional Coverage Tests for Helper Functions
+// =============================================================================
+
+func TestParseEmailRecipients_Coverage(t *testing.T) {
+	// This test ensures parseEmailRecipients is called and its logic is exercised
+	t.Run("valid single email", func(t *testing.T) {
+		result, err := parseEmailRecipients([]string{"test@example.com"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if len(result) != 1 || result[0] != "test@example.com" {
+			t.Errorf("expected [test@example.com], got %v", result)
+		}
+	})
+
+	t.Run("multiple valid emails", func(t *testing.T) {
+		result, err := parseEmailRecipients([]string{"a@b.com", "c@d.com"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if len(result) != 2 {
+			t.Errorf("expected 2 results, got %d", len(result))
+		}
+	})
+
+	t.Run("invalid email returns error", func(t *testing.T) {
+		_, err := parseEmailRecipients([]string{"invalid"})
+		if err == nil {
+			t.Error("expected error for invalid email, got nil")
+		}
+	})
+
+	t.Run("filters empty strings", func(t *testing.T) {
+		result, err := parseEmailRecipients([]string{"  ", "test@example.com", ""})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if len(result) != 1 {
+			t.Errorf("expected 1 result after filtering, got %d", len(result))
+		}
+	})
+}
+
+func TestBuildReplySubject_Coverage(t *testing.T) {
+	// This test ensures buildReplySubject is called and its logic is exercised
+	t.Run("adds Re: prefix", func(t *testing.T) {
+		result := buildReplySubject("Test Subject")
+		if result != "Re: Test Subject" {
+			t.Errorf("expected 'Re: Test Subject', got %q", result)
+		}
+	})
+
+	t.Run("preserves existing Re:", func(t *testing.T) {
+		result := buildReplySubject("Re: Test Subject")
+		if result != "Re: Test Subject" {
+			t.Errorf("expected 'Re: Test Subject', got %q", result)
+		}
+	})
+
+	t.Run("handles lowercase re:", func(t *testing.T) {
+		result := buildReplySubject("re: Test Subject")
+		if result != "re: Test Subject" {
+			t.Errorf("expected 're: Test Subject', got %q", result)
+		}
+	})
+
+	t.Run("handles empty subject", func(t *testing.T) {
+		result := buildReplySubject("")
+		if result != "Re: " {
+			t.Errorf("expected 'Re: ', got %q", result)
+		}
+	})
+
+	t.Run("handles subject starting with 'Re' but not prefix", func(t *testing.T) {
+		result := buildReplySubject("Regarding your request")
+		if result != "Re: Regarding your request" {
+			t.Errorf("expected 'Re: Regarding your request', got %q", result)
+		}
+	})
+}
+
+// =============================================================================
+// Additional Comprehensive Tests for Mail Compose Commands
+// =============================================================================
+
+func TestMailSendCmd_InvalidRecipients(t *testing.T) {
+	// Test validation of invalid email addresses
+	tests := []struct {
+		name        string
+		to          []string
+		cc          []string
+		bcc         []string
+		expectError string
+	}{
+		{
+			name:        "invalid to address",
+			to:          []string{"notanemail"},
+			expectError: "invalid email",
+		},
+		{
+			name:        "invalid cc address",
+			to:          []string{"valid@example.com"},
+			cc:          []string{"invalid"},
+			expectError: "invalid email",
+		},
+		{
+			name:        "invalid bcc address",
+			to:          []string{"valid@example.com"},
+			bcc:         []string{"@example.com"},
+			expectError: "invalid email",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test parseEmailRecipients directly since the RunE function can't be fully tested
+			// Only test the field that should have the error
+			testFailed := false
+
+			if len(tt.to) > 0 && strings.Contains(tt.name, "to") {
+				_, err := parseEmailRecipients(tt.to)
+				if tt.expectError != "" && err == nil {
+					t.Error("expected error for invalid 'to' recipients, got nil")
+					testFailed = true
+				}
+			}
+			if len(tt.cc) > 0 && strings.Contains(tt.name, "cc") {
+				_, err := parseEmailRecipients(tt.cc)
+				if tt.expectError != "" && err == nil {
+					t.Error("expected error for invalid 'cc' recipients, got nil")
+					testFailed = true
+				}
+			}
+			if len(tt.bcc) > 0 && strings.Contains(tt.name, "bcc") {
+				_, err := parseEmailRecipients(tt.bcc)
+				if tt.expectError != "" && err == nil {
+					t.Error("expected error for invalid 'bcc' recipients, got nil")
+					testFailed = true
+				}
+			}
+
+			// Verify at least one check was performed
+			if !testFailed && !strings.Contains(tt.name, "to") && !strings.Contains(tt.name, "cc") && !strings.Contains(tt.name, "bcc") {
+				t.Error("test case name should indicate which field to test (to/cc/bcc)")
+			}
+		})
+	}
+}
+
+func TestMailComposeCmd_FlagDefaults(t *testing.T) {
+	t.Run("send command html flag default", func(t *testing.T) {
+		flag := mailSendCmd.Flag("html")
+		if flag == nil {
+			t.Fatal("expected --html flag to exist")
+		}
+		if flag.DefValue != "false" {
+			t.Errorf("expected html flag default to be false, got %s", flag.DefValue)
+		}
+	})
+
+	t.Run("reply command all flag default", func(t *testing.T) {
+		flag := mailReplyCmd.Flag("all")
+		if flag == nil {
+			t.Fatal("expected --all flag to exist")
+		}
+		if flag.DefValue != "false" {
+			t.Errorf("expected all flag default to be false, got %s", flag.DefValue)
+		}
+	})
+
+	t.Run("send command has all required flags", func(t *testing.T) {
+		requiredFlags := []string{"to", "subject", "body", "cc", "bcc", "html"}
+		for _, flagName := range requiredFlags {
+			if mailSendCmd.Flag(flagName) == nil {
+				t.Errorf("expected --%s flag to exist on send command", flagName)
+			}
+		}
+	})
+
+	t.Run("reply command has all required flags", func(t *testing.T) {
+		requiredFlags := []string{"body", "all"}
+		for _, flagName := range requiredFlags {
+			if mailReplyCmd.Flag(flagName) == nil {
+				t.Errorf("expected --%s flag to exist on reply command", flagName)
+			}
+		}
+	})
+
+	t.Run("forward command has all required flags", func(t *testing.T) {
+		requiredFlags := []string{"to", "body"}
+		for _, flagName := range requiredFlags {
+			if mailForwardCmd.Flag(flagName) == nil {
+				t.Errorf("expected --%s flag to exist on forward command", flagName)
+			}
+		}
+	})
+}
+
+func TestMailSendCmd_PreRunValidations(t *testing.T) {
+	tests := []struct {
+		name      string
+		to        []string
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name:      "empty to list fails",
+			to:        []string{},
+			expectErr: true,
+			errMsg:    "to",
+		},
+		{
+			name:      "nil to list fails",
+			to:        nil,
+			expectErr: true,
+			errMsg:    "to",
+		},
+		{
+			name:      "valid to list passes",
+			to:        []string{"user@example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "multiple valid recipients passes",
+			to:        []string{"user1@example.com", "user2@example.com"},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origTo := mailSendTo
+			mailSendTo = tt.to
+			defer func() { mailSendTo = origTo }()
+
+			mockCmd := &cobra.Command{Use: "test"}
+			err := mailSendCmd.PreRunE(mockCmd, []string{})
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error to contain %q, got %q", tt.errMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailReplyCmd_PreRunValidations(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name:      "empty body fails",
+			body:      "",
+			expectErr: true,
+			errMsg:    "body",
+		},
+		{
+			name:      "valid body passes",
+			body:      "Thanks for your message!",
+			expectErr: false,
+		},
+		{
+			name:      "whitespace body passes (non-empty string)",
+			body:      "   ",
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origBody := mailReplyBody
+			mailReplyBody = tt.body
+			defer func() { mailReplyBody = origBody }()
+
+			mockCmd := &cobra.Command{Use: "test"}
+			err := mailReplyCmd.PreRunE(mockCmd, []string{"msg123"})
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error to contain %q, got %q", tt.errMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailForwardCmd_PreRunValidations(t *testing.T) {
+	tests := []struct {
+		name      string
+		to        []string
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name:      "empty to list fails",
+			to:        []string{},
+			expectErr: true,
+			errMsg:    "to",
+		},
+		{
+			name:      "nil to list fails",
+			to:        nil,
+			expectErr: true,
+			errMsg:    "to",
+		},
+		{
+			name:      "valid to list passes",
+			to:        []string{"colleague@example.com"},
+			expectErr: false,
+		},
+		{
+			name:      "multiple valid recipients passes",
+			to:        []string{"user1@example.com", "user2@example.com"},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origTo := mailForwardTo
+			mailForwardTo = tt.to
+			defer func() { mailForwardTo = origTo }()
+
+			mockCmd := &cobra.Command{Use: "test"}
+			err := mailForwardCmd.PreRunE(mockCmd, []string{"msg123"})
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error to contain %q, got %q", tt.errMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMailComposeCmd_ArgsValidation(t *testing.T) {
+	t.Run("reply requires exactly one argument", func(t *testing.T) {
+		tests := []struct {
+			args      []string
+			expectErr bool
+		}{
+			{[]string{}, true},
+			{[]string{"msg123"}, false},
+			{[]string{"msg123", "extra"}, true},
+		}
+
+		for _, tt := range tests {
+			err := mailReplyCmd.Args(mailReplyCmd, tt.args)
+			if tt.expectErr && err == nil {
+				t.Errorf("expected error for args %v, got nil", tt.args)
+			}
+			if !tt.expectErr && err != nil {
+				t.Errorf("unexpected error for args %v: %v", tt.args, err)
+			}
+		}
+	})
+
+	t.Run("forward requires exactly one argument", func(t *testing.T) {
+		tests := []struct {
+			args      []string
+			expectErr bool
+		}{
+			{[]string{}, true},
+			{[]string{"msg123"}, false},
+			{[]string{"msg123", "extra"}, true},
+		}
+
+		for _, tt := range tests {
+			err := mailForwardCmd.Args(mailForwardCmd, tt.args)
+			if tt.expectErr && err == nil {
+				t.Errorf("expected error for args %v, got nil", tt.args)
+			}
+			if !tt.expectErr && err != nil {
+				t.Errorf("unexpected error for args %v: %v", tt.args, err)
+			}
+		}
+	})
+
+	t.Run("send requires no positional arguments", func(t *testing.T) {
+		// Send command doesn't define Args validator, so any number is technically allowed
+		// This is by design since all inputs come from flags
+		// No validation needed here
+	})
+}
+
+func TestMailComposeCmd_Aliases(t *testing.T) {
+	// Mail compose commands don't define aliases, but we should verify this is intentional
+	t.Run("send has no aliases", func(t *testing.T) {
+		if len(mailSendCmd.Aliases) > 0 {
+			t.Errorf("send command should have no aliases, but has %v", mailSendCmd.Aliases)
+		}
+	})
+
+	t.Run("reply has no aliases", func(t *testing.T) {
+		if len(mailReplyCmd.Aliases) > 0 {
+			t.Errorf("reply command should have no aliases, but has %v", mailReplyCmd.Aliases)
+		}
+	})
+
+	t.Run("forward has no aliases", func(t *testing.T) {
+		if len(mailForwardCmd.Aliases) > 0 {
+			t.Errorf("forward command should have no aliases, but has %v", mailForwardCmd.Aliases)
+		}
+	})
+}

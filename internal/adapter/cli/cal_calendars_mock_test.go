@@ -15,6 +15,11 @@ import (
 // Tests using dependency injection with mocks for calendar commands
 // =============================================================================
 
+// NOTE: The calendar management commands (runCalendarsList, runCalendarsCreate, etc.)
+// do not currently use the dependency injection framework. They call getCalendarRepository
+// which in turn calls getTokenSource directly. These tests document this limitation
+// and serve as integration tests once DI support is added.
+
 func TestRunCalendarsList_WithMockDependencies(t *testing.T) {
 	mockCalendars := []*calendar.Calendar{
 		{ID: "primary", Title: "Personal Calendar", Primary: true, TimeZone: "America/New_York", AccessRole: "owner"},

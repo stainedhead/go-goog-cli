@@ -1279,3 +1279,21 @@ func TestRunCalToday_MultipleEvents(t *testing.T) {
 		t.Errorf("expected output to show 3 events, got: %s", output)
 	}
 }
+
+func TestGetGCalEventRepository_NoAccount(t *testing.T) {
+	// Test getGCalEventRepository when no account is configured
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:    nil,
+			ResolveErr: fmt.Errorf("no account configured"),
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	_, err := getGCalEventRepository(nil)
+	if err == nil {
+		t.Error("expected error when no account is configured")
+	}
+}
