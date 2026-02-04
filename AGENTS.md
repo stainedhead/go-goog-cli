@@ -30,13 +30,32 @@ Dependencies flow inward only. Inner layers define interfaces; outer layers impl
 
 ## Development Methodology: TDD
 
-Follow strict Test-Driven Development:
+Follow strict Test-Driven Development with the complete Red-Green-Refactor cycle:
 
 ### Red-Green-Refactor Cycle
 
+**IMPORTANT:** All three phases are mandatory. Do not skip the refactor phase.
+
 1. **Red**: Write a failing test that defines expected behavior
+   - Test must fail for the right reason
+   - Verify the test actually exercises the code path
+
 2. **Green**: Write minimal code to make the test pass
-3. **Refactor**: Improve code quality while keeping tests green
+   - Focus on making tests pass, not on perfection
+   - Avoid premature optimization
+   - Get to green as quickly as possible
+
+3. **Refactor**: Improve code quality while keeping tests green (MANDATORY)
+   - **This phase is NOT optional** - refactoring must be done after tests pass
+   - Eliminate duplication (DRY principle)
+   - Improve naming and readability
+   - Extract functions/methods for clarity
+   - Simplify complex logic
+   - Apply design patterns where appropriate
+   - **Run tests after each refactoring step** to ensure they stay green
+   - Continue refactoring until code meets quality standards
+
+**The cycle is complete only after refactoring.** Moving to the next feature without refactoring accumulates technical debt.
 
 ### Test Organization
 
@@ -128,9 +147,14 @@ go mod tidy
 1. Generate initial code structure to satisfy interfaces
 2. Run tests - expect failures
 3. Implement until tests pass
-4. Refactor for clarity, performance, and maintainability
-5. Verify tests still pass
+4. **Refactor for clarity, performance, and maintainability (MANDATORY)**
+   - Eliminate duplication
+   - Improve naming and structure
+   - Simplify complex code
+   - This step is required, not optional
+5. Verify tests still pass after refactoring
 6. Run linters and fix issues
+7. If linter suggests improvements, refactor again (return to step 4)
 
 ## Quality Gates
 
@@ -243,11 +267,20 @@ When making changes:
 
 1. **Understand**: Read relevant documentation and code before modifying
 2. **Plan**: Identify affected components across all architectural layers
-3. **Test First**: Write or update tests before implementation
-4. **Implement**: Make minimal changes to pass tests
-5. **Refine**: Improve code quality
+3. **Test First (Red)**: Write or update tests before implementation
+   - Tests should fail initially
+4. **Implement (Green)**: Make minimal changes to pass tests
+   - Get tests passing quickly
+5. **Refactor (Mandatory)**: Improve code quality while keeping tests green
+   - Eliminate duplication
+   - Improve naming and structure
+   - Extract functions for clarity
+   - Simplify complex logic
+   - **Run tests after each refactoring change**
+   - Continue until code is clean and maintainable
 6. **Quality Gates**: Run all quality gate checks (format, tidy, vet, lint, test, build)
 7. **Fix Issues**: Resolve any failures from quality gates
+   - If linter suggests improvements, refactor (return to step 5)
 8. **Document**: Update all affected documentation files
 9. **Final Verify**: Re-run quality gates to confirm all pass
 
