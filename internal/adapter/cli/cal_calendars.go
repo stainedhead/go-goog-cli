@@ -210,7 +210,8 @@ func getCalendarRepository(ctx context.Context) (*repository.GCalCalendarReposit
 func runCalendarsList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	repo, err := getCalendarRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getCalendarRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -234,7 +235,8 @@ func runCalendarsShow(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	calendarID := args[0]
 
-	repo, err := getCalendarRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getCalendarRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -257,7 +259,8 @@ func runCalendarsShow(cmd *cobra.Command, args []string) error {
 func runCalendarsCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	repo, err := getCalendarRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getCalendarRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -297,7 +300,8 @@ func runCalendarsUpdate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	calendarID := args[0]
 
-	repo, err := getCalendarRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getCalendarRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -348,7 +352,8 @@ func runCalendarsDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	calendarID := args[0]
 
-	repo, err := getCalendarRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getCalendarRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -385,7 +390,8 @@ func runCalendarsClear(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	calendarID := args[0]
 
-	repo, err := getCalendarRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getCalendarRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}

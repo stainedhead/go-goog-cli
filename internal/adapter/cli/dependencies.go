@@ -9,6 +9,7 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/adapter/repository"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	"github.com/stainedhead/go-goog-cli/internal/infrastructure/auth"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/keyring"
 	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
@@ -108,6 +109,10 @@ type FreeBusyRepository interface {
 // AccountService defines operations for managing user accounts.
 type AccountService interface {
 	List() ([]*accountuc.Account, error)
+	Add(ctx context.Context, alias string, scopes []string) (*accountuc.Account, error)
+	Remove(alias string) error
+	Switch(alias string) error
+	Rename(oldAlias, newAlias string) error
 	ResolveAccount(flagValue string) (*accountuc.Account, error)
 	GetTokenManager() TokenManager
 }
@@ -115,6 +120,9 @@ type AccountService interface {
 // TokenManager defines operations for managing OAuth tokens.
 type TokenManager interface {
 	GetTokenSource(ctx context.Context, alias string) (oauth2.TokenSource, error)
+	GetTokenInfo(alias string) (*auth.TokenInfo, error)
+	RefreshToken(ctx context.Context, alias string, cfg *oauth2.Config) (*oauth2.Token, error)
+	GetGrantedScopes(alias string) ([]string, error)
 }
 
 // RepositoryFactory creates repository instances from a token source.
@@ -207,6 +215,49 @@ func (s *defaultAccountService) List() ([]*accountuc.Account, error) {
 	return s.svc.List()
 }
 
+// Add adds a new account with OAuth authentication.
+func (s *defaultAccountService) Add(ctx context.Context, alias string, scopes []string) (*accountuc.Account, error) {
+	if err := s.ensureService(); err != nil {
+		return nil, err
+	}
+	// Need to create a service with OAuth flow for Add operation
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	store, err := keyring.NewStore()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize keyring: %w", err)
+	}
+	flow := accountuc.NewDefaultOAuthFlow()
+	svcWithFlow := accountuc.NewService(cfg, store, flow)
+	return svcWithFlow.Add(ctx, alias, scopes)
+}
+
+// Remove removes an account.
+func (s *defaultAccountService) Remove(alias string) error {
+	if err := s.ensureService(); err != nil {
+		return err
+	}
+	return s.svc.Remove(alias)
+}
+
+// Switch switches the default account.
+func (s *defaultAccountService) Switch(alias string) error {
+	if err := s.ensureService(); err != nil {
+		return err
+	}
+	return s.svc.Switch(alias)
+}
+
+// Rename renames an account.
+func (s *defaultAccountService) Rename(oldAlias, newAlias string) error {
+	if err := s.ensureService(); err != nil {
+		return err
+	}
+	return s.svc.Rename(oldAlias, newAlias)
+}
+
 // ResolveAccount resolves the account to use based on configuration.
 func (s *defaultAccountService) ResolveAccount(flagValue string) (*accountuc.Account, error) {
 	if err := s.ensureService(); err != nil {
@@ -225,14 +276,27 @@ func (s *defaultAccountService) GetTokenManager() TokenManager {
 
 // defaultTokenManager wraps the auth.TokenManager.
 type defaultTokenManager struct {
-	tm interface {
-		GetTokenSource(ctx context.Context, alias string) (oauth2.TokenSource, error)
-	}
+	tm *auth.TokenManager
 }
 
 // GetTokenSource returns an OAuth2 token source for the given account alias.
 func (m *defaultTokenManager) GetTokenSource(ctx context.Context, alias string) (oauth2.TokenSource, error) {
 	return m.tm.GetTokenSource(ctx, alias)
+}
+
+// GetTokenInfo returns token information for the given account alias.
+func (m *defaultTokenManager) GetTokenInfo(alias string) (*auth.TokenInfo, error) {
+	return m.tm.GetTokenInfo(alias)
+}
+
+// RefreshToken refreshes the OAuth token for the given account alias.
+func (m *defaultTokenManager) RefreshToken(ctx context.Context, alias string, cfg *oauth2.Config) (*oauth2.Token, error) {
+	return m.tm.RefreshToken(ctx, alias, cfg)
+}
+
+// GetGrantedScopes returns the granted scopes for the given account alias.
+func (m *defaultTokenManager) GetGrantedScopes(alias string) ([]string, error) {
+	return m.tm.GetGrantedScopes(alias)
 }
 
 // defaultRepositoryFactory implements RepositoryFactory using production implementations.

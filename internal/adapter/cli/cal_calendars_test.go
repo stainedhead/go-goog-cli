@@ -3,9 +3,12 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
+	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 func TestCalendarsCmd_Help(t *testing.T) {
@@ -564,5 +567,453 @@ func TestCalendarsUpdateCmd_HasFlags(t *testing.T) {
 		if flag == nil {
 			t.Errorf("expected --%s flag to be defined on update command", flagName)
 		}
+	}
+}
+
+// =============================================================================
+// Execution tests for calendar management operations
+// =============================================================================
+
+func TestRunCalendarsList_Success(t *testing.T) {
+	mockCalendars := []*calendar.Calendar{
+		{ID: "primary", Title: "Personal Calendar", Primary: true},
+		{ID: "work@group.calendar.google.com", Title: "Work Calendar"},
+	}
+
+	mockRepo := &MockCalendarRepository{
+		Calendars: mockCalendars,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "plain"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsList(cmd, []string{})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Personal Calendar") {
+		t.Error("expected output to contain 'Personal Calendar'")
+	}
+	if !contains(output, "Work Calendar") {
+		t.Error("expected output to contain 'Work Calendar'")
+	}
+}
+
+func TestRunCalendarsShow_Success(t *testing.T) {
+	mockCal := &calendar.Calendar{
+		ID:       "primary",
+		Title:    "Personal Calendar",
+		Primary:  true,
+		TimeZone: "America/New_York",
+	}
+
+	mockRepo := &MockCalendarRepository{
+		Calendar: mockCal,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "plain"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsShow(cmd, []string{"primary"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Personal Calendar") {
+		t.Error("expected output to contain calendar title")
+	}
+}
+
+func TestRunCalendarsCreate_Success(t *testing.T) {
+	mockCal := &calendar.Calendar{
+		ID:    "new-cal-id",
+		Title: "New Calendar",
+	}
+
+	mockRepo := &MockCalendarRepository{
+		CreateResult: mockCal,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origTitle := calendarsTitle
+	origFormat := formatFlag
+
+	calendarsTitle = "New Calendar"
+	formatFlag = "plain"
+
+	defer func() {
+		calendarsTitle = origTitle
+		formatFlag = origFormat
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsCreate(cmd, []string{})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "New Calendar") {
+		t.Error("expected output to contain calendar title")
+	}
+	if !contains(output, "new-cal-id") {
+		t.Error("expected output to contain calendar ID")
+	}
+}
+
+func TestRunCalendarsCreate_Error(t *testing.T) {
+	mockRepo := &MockCalendarRepository{
+		CreateErr: fmt.Errorf("API error"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origTitle := calendarsTitle
+	calendarsTitle = "New Calendar"
+	defer func() { calendarsTitle = origTitle }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsCreate(cmd, []string{})
+
+	if err == nil {
+		t.Error("expected error from repository")
+	}
+	if !contains(err.Error(), "failed to create calendar") {
+		t.Errorf("expected create error, got: %v", err)
+	}
+}
+
+func TestRunCalendarsUpdate_Success(t *testing.T) {
+	existingCal := &calendar.Calendar{
+		ID:         "cal-123",
+		Title:      "Old Title",
+		AccessRole: "owner",
+	}
+
+	updatedCal := &calendar.Calendar{
+		ID:    "cal-123",
+		Title: "New Title",
+	}
+
+	mockRepo := &MockCalendarRepository{
+		Calendar:     existingCal,
+		UpdateResult: updatedCal,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origTitle := calendarsTitle
+	origFormat := formatFlag
+
+	calendarsTitle = "New Title"
+	formatFlag = "plain"
+
+	defer func() {
+		calendarsTitle = origTitle
+		formatFlag = origFormat
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsUpdate(cmd, []string{"cal-123"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "New Title") {
+		t.Error("expected output to contain new title")
+	}
+}
+
+func TestRunCalendarsUpdate_NotOwner(t *testing.T) {
+	existingCal := &calendar.Calendar{
+		ID:         "cal-123",
+		Title:      "Calendar",
+		AccessRole: "reader",
+	}
+
+	mockRepo := &MockCalendarRepository{
+		Calendar: existingCal,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origTitle := calendarsTitle
+	calendarsTitle = "New Title"
+	defer func() { calendarsTitle = origTitle }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsUpdate(cmd, []string{"cal-123"})
+
+	if err == nil {
+		t.Error("expected error for insufficient permissions")
+	}
+	if !contains(err.Error(), "cannot modify calendar") {
+		t.Errorf("expected permission error, got: %v", err)
+	}
+}
+
+func TestRunCalendarsDelete_Success(t *testing.T) {
+	existingCal := &calendar.Calendar{
+		ID:         "cal-123",
+		Title:      "Calendar to Delete",
+		Primary:    false,
+		AccessRole: "owner",
+	}
+
+	mockRepo := &MockCalendarRepository{
+		Calendar: existingCal,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = false
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsDelete(cmd, []string{"cal-123"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "deleted successfully") {
+		t.Error("expected success message in output")
+	}
+}
+
+func TestRunCalendarsDelete_PrimaryCalendar(t *testing.T) {
+	existingCal := &calendar.Calendar{
+		ID:         "primary",
+		Title:      "Personal Calendar",
+		Primary:    true,
+		AccessRole: "owner",
+	}
+
+	mockRepo := &MockCalendarRepository{
+		Calendar: existingCal,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsDelete(cmd, []string{"primary"})
+
+	if err == nil {
+		t.Error("expected error for deleting primary calendar")
+	}
+	if !contains(err.Error(), "cannot delete primary calendar") {
+		t.Errorf("expected primary calendar error, got: %v", err)
+	}
+}
+
+func TestRunCalendarsClear_Success(t *testing.T) {
+	existingCal := &calendar.Calendar{
+		ID:    "primary",
+		Title: "Personal Calendar",
+	}
+
+	mockRepo := &MockCalendarRepository{
+		Calendar: existingCal,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = false
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsClear(cmd, []string{"primary"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "cleared") {
+		t.Error("expected success message in output")
+	}
+}
+
+func TestRunCalendarsClear_Error(t *testing.T) {
+	existingCal := &calendar.Calendar{
+		ID:    "primary",
+		Title: "Personal Calendar",
+	}
+
+	mockRepo := &MockCalendarRepository{
+		Calendar: existingCal,
+		ClearErr: fmt.Errorf("API error"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			CalendarRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalendarsClear(cmd, []string{"primary"})
+
+	if err == nil {
+		t.Error("expected error from repository")
+	}
+	if !contains(err.Error(), "failed to clear calendar") {
+		t.Errorf("expected clear error, got: %v", err)
 	}
 }

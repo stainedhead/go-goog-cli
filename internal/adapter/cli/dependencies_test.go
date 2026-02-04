@@ -7,6 +7,7 @@ import (
 
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	"github.com/stainedhead/go-goog-cli/internal/infrastructure/auth"
 	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 	"golang.org/x/oauth2"
 )
@@ -34,8 +35,17 @@ func (m *MockTokenSource) Token() (*oauth2.Token, error) {
 
 // MockTokenManager implements TokenManager for testing.
 type MockTokenManager struct {
-	TokenSource oauth2.TokenSource
-	Err         error
+	TokenSource          oauth2.TokenSource
+	Err                  error
+	GetTokenInfoFunc     func(alias string) (*auth.TokenInfo, error)
+	RefreshTokenFunc     func(ctx context.Context, alias string, cfg *oauth2.Config) (*oauth2.Token, error)
+	GetGrantedScopesFunc func(alias string) ([]string, error)
+	TokenInfo            *auth.TokenInfo
+	TokenInfoErr         error
+	RefreshTokenRes      *oauth2.Token
+	RefreshTokenErr      error
+	GrantedScopes        []string
+	GrantedScopesErr     error
 }
 
 // GetTokenSource returns the mock token source.
@@ -49,6 +59,59 @@ func (m *MockTokenManager) GetTokenSource(ctx context.Context, alias string) (oa
 	return m.TokenSource, nil
 }
 
+// GetTokenInfo returns mock token information.
+func (m *MockTokenManager) GetTokenInfo(alias string) (*auth.TokenInfo, error) {
+	if m.GetTokenInfoFunc != nil {
+		return m.GetTokenInfoFunc(alias)
+	}
+	if m.TokenInfoErr != nil {
+		return nil, m.TokenInfoErr
+	}
+	if m.TokenInfo != nil {
+		return m.TokenInfo, nil
+	}
+	// Return a default token info structure
+	return &auth.TokenInfo{
+		Account:    alias,
+		HasToken:   true,
+		IsExpired:  false,
+		ExpiryTime: time.Now().Add(time.Hour).Format(time.RFC3339),
+		Scopes:     []string{"email", "openid"},
+		TokenType:  "Bearer",
+	}, nil
+}
+
+// RefreshToken refreshes the mock OAuth token.
+func (m *MockTokenManager) RefreshToken(ctx context.Context, alias string, cfg *oauth2.Config) (*oauth2.Token, error) {
+	if m.RefreshTokenFunc != nil {
+		return m.RefreshTokenFunc(ctx, alias, cfg)
+	}
+	if m.RefreshTokenErr != nil {
+		return nil, m.RefreshTokenErr
+	}
+	if m.RefreshTokenRes != nil {
+		return m.RefreshTokenRes, nil
+	}
+	return &oauth2.Token{
+		AccessToken: "refreshed-token",
+		Expiry:      time.Now().Add(time.Hour),
+	}, nil
+}
+
+// GetGrantedScopes returns mock granted scopes.
+func (m *MockTokenManager) GetGrantedScopes(alias string) ([]string, error) {
+	if m.GetGrantedScopesFunc != nil {
+		return m.GetGrantedScopesFunc(alias)
+	}
+	if m.GrantedScopesErr != nil {
+		return nil, m.GrantedScopesErr
+	}
+	if m.GrantedScopes != nil {
+		return m.GrantedScopes, nil
+	}
+	return []string{"email", "openid"}, nil
+}
+
 // MockAccountService implements AccountService for testing.
 type MockAccountService struct {
 	Accounts     []*accountuc.Account
@@ -56,6 +119,15 @@ type MockAccountService struct {
 	ListErr      error
 	ResolveErr   error
 	TokenManager TokenManager
+	AddFunc      func(ctx context.Context, alias string, scopes []string) (*accountuc.Account, error)
+	RemoveFunc   func(alias string) error
+	SwitchFunc   func(alias string) error
+	RenameFunc   func(oldAlias, newAlias string) error
+	AddResult    *accountuc.Account
+	AddErr       error
+	RemoveErr    error
+	SwitchErr    error
+	RenameErr    error
 }
 
 // List returns the mock accounts.
@@ -64,6 +136,48 @@ func (m *MockAccountService) List() ([]*accountuc.Account, error) {
 		return nil, m.ListErr
 	}
 	return m.Accounts, nil
+}
+
+// Add adds a new account.
+func (m *MockAccountService) Add(ctx context.Context, alias string, scopes []string) (*accountuc.Account, error) {
+	if m.AddFunc != nil {
+		return m.AddFunc(ctx, alias, scopes)
+	}
+	if m.AddErr != nil {
+		return nil, m.AddErr
+	}
+	if m.AddResult != nil {
+		return m.AddResult, nil
+	}
+	return &accountuc.Account{
+		Alias:     alias,
+		Email:     "test@example.com",
+		IsDefault: true,
+	}, nil
+}
+
+// Remove removes an account.
+func (m *MockAccountService) Remove(alias string) error {
+	if m.RemoveFunc != nil {
+		return m.RemoveFunc(alias)
+	}
+	return m.RemoveErr
+}
+
+// Switch switches the default account.
+func (m *MockAccountService) Switch(alias string) error {
+	if m.SwitchFunc != nil {
+		return m.SwitchFunc(alias)
+	}
+	return m.SwitchErr
+}
+
+// Rename renames an account.
+func (m *MockAccountService) Rename(oldAlias, newAlias string) error {
+	if m.RenameFunc != nil {
+		return m.RenameFunc(oldAlias, newAlias)
+	}
+	return m.RenameErr
 }
 
 // ResolveAccount returns the mock account.

@@ -144,8 +144,8 @@ func init() {
 func runMailSend(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get Gmail repository
-	repo, senderEmail, err := getGmailRepository(ctx)
+	// Get message repository using DI framework
+	repo, senderEmail, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -199,8 +199,8 @@ func runMailReply(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	messageID := args[0]
 
-	// Get Gmail repository
-	repo, senderEmail, err := getGmailRepository(ctx)
+	// Get message repository using DI framework
+	repo, senderEmail, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -251,8 +251,8 @@ func runMailForward(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	messageID := args[0]
 
-	// Get Gmail repository
-	repo, senderEmail, err := getGmailRepository(ctx)
+	// Get message repository using DI framework
+	repo, senderEmail, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}

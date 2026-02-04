@@ -4,6 +4,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -460,4 +461,334 @@ func (m *MockTokenManagerExtended) GetGrantedScopes(alias string) ([]string, err
 		return nil, m.GrantedScopesErr
 	}
 	return m.GrantedScopes, nil
+}
+
+// TestRunAuthLogin_Execution tests the runAuthLogin function with mocks.
+func TestRunAuthLogin_Execution(t *testing.T) {
+	t.Run("login successfully", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			AddResult: &accountuc.Account{
+				Alias:     "default",
+				Email:     "user@example.com",
+				IsDefault: true,
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAuthLogin(cmd, []string{})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "Successfully logged in") {
+			t.Error("expected success message")
+		}
+		if !contains(output, "user@example.com") {
+			t.Error("expected output to contain email")
+		}
+	})
+
+	t.Run("login error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			AddErr: fmt.Errorf("OAuth failed"),
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAuthLogin(cmd, []string{})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if !contains(err.Error(), "login failed") {
+			t.Errorf("expected error to contain 'login failed', got: %v", err)
+		}
+	})
+}
+
+// TestRunAuthLogout_Execution tests the runAuthLogout function with mocks.
+func TestRunAuthLogout_Execution(t *testing.T) {
+	t.Run("logout successfully", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			MockAccountService: MockAccountService{
+				Account: &accountuc.Account{
+					Alias: "work",
+					Email: "work@company.com",
+				},
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAuthLogout(cmd, []string{})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "Successfully logged out") {
+			t.Error("expected success message")
+		}
+	})
+
+	t.Run("logout resolve error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			MockAccountService: MockAccountService{
+				ResolveErr: fmt.Errorf("no account found"),
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAuthLogout(cmd, []string{})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("logout remove error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			MockAccountService: MockAccountService{
+				Account: &accountuc.Account{
+					Alias: "work",
+					Email: "work@company.com",
+				},
+			},
+			RemoveErr: fmt.Errorf("remove failed"),
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAuthLogout(cmd, []string{})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+}
+
+// TestRunAuthStatus_Execution tests the runAuthStatus function with mocks.
+func TestRunAuthStatus_Execution(t *testing.T) {
+	t.Run("status shows authenticated account", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			MockAccountService: MockAccountService{
+				Account: &accountuc.Account{
+					Alias:     "work",
+					Email:     "work@company.com",
+					IsDefault: true,
+					Added:     time.Now(),
+					Scopes:    []string{"email", "openid"},
+				},
+				TokenManager: &MockTokenManager{},
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAuthStatus(cmd, []string{})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "work@company.com") {
+			t.Error("expected output to contain email")
+		}
+		if !contains(output, "Status:") {
+			t.Error("expected output to contain status")
+		}
+	})
+
+	t.Run("status with no account", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			MockAccountService: MockAccountService{
+				ResolveErr: fmt.Errorf("no account found"),
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAuthStatus(cmd, []string{})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+}
+
+// TestRunAuthRefresh_Execution tests the runAuthRefresh function with mocks.
+func TestRunAuthRefresh_Execution(t *testing.T) {
+	t.Run("refresh token successfully", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			MockAccountService: MockAccountService{
+				Account: &accountuc.Account{
+					Alias: "work",
+					Email: "work@company.com",
+				},
+				TokenManager: &MockTokenManager{
+					TokenSource: &MockTokenSource{
+						token: &oauth2.Token{
+							AccessToken: "new-token",
+							Expiry:      time.Now().Add(time.Hour),
+						},
+					},
+				},
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAuthRefresh(cmd, []string{})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "Successfully refreshed token") {
+			t.Error("expected success message")
+		}
+	})
+
+	t.Run("refresh with no account", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			MockAccountService: MockAccountService{
+				ResolveErr: fmt.Errorf("no account found"),
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAuthRefresh(cmd, []string{})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("refresh token error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountServiceExtended{
+			MockAccountService: MockAccountService{
+				Account: &accountuc.Account{
+					Alias: "work",
+					Email: "work@company.com",
+				},
+				TokenManager: &MockTokenManager{
+					Err: fmt.Errorf("token refresh failed"),
+				},
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAuthRefresh(cmd, []string{})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
 }

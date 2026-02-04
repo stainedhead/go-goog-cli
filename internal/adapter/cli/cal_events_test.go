@@ -3,10 +3,13 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
+	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 func TestCalCreateCmd_Help(t *testing.T) {
@@ -1874,5 +1877,550 @@ func TestIsValidEmail_ComprehensiveCoverage(t *testing.T) {
 				t.Errorf("isValidEmail(%q) = %v, want %v", tt.email, result, tt.valid)
 			}
 		})
+	}
+}
+
+// =============================================================================
+// Execution tests for event CRUD operations (runCalCreate, runCalUpdate, runCalDelete)
+// =============================================================================
+
+func TestRunCalCreate_Success(t *testing.T) {
+	// Setup - use future date to avoid validation errors
+	futureDate := time.Now().AddDate(0, 1, 0)
+	mockEvent := &calendar.Event{
+		ID:       "created-event-id",
+		Title:    "Test Event",
+		Start:    futureDate,
+		End:      futureDate.Add(time.Hour),
+		HTMLLink: "https://calendar.google.com/event?eid=xyz",
+	}
+
+	mockRepo := &MockEventRepository{
+		CreateResult: mockEvent,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	// Set command flags
+	origTitle := calCreateTitle
+	origStart := calCreateStart
+	origEnd := calCreateEnd
+	origAllDay := calCreateAllDay
+	origCalendar := calCreateCalendar
+	origFormat := formatFlag
+	origQuiet := quietFlag
+
+	calCreateTitle = "Test Event"
+	calCreateStart = futureDate.Format("2006-01-02 15:04")
+	calCreateEnd = futureDate.Add(time.Hour).Format("2006-01-02 15:04")
+	calCreateAllDay = false
+	calCreateCalendar = "primary"
+	formatFlag = "plain"
+	quietFlag = false
+
+	defer func() {
+		calCreateTitle = origTitle
+		calCreateStart = origStart
+		calCreateEnd = origEnd
+		calCreateAllDay = origAllDay
+		calCreateCalendar = origCalendar
+		formatFlag = origFormat
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	// Execute
+	err := runCalCreate(cmd, []string{})
+
+	// Assert
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Test Event") {
+		t.Error("expected output to contain event title")
+	}
+	if !contains(output, "created-event-id") {
+		t.Error("expected output to contain event ID")
+	}
+}
+
+func TestRunCalCreate_AllDayEvent(t *testing.T) {
+	// Use future date
+	futureDate := time.Now().AddDate(0, 1, 0)
+
+	mockRepo := &MockEventRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origTitle := calCreateTitle
+	origStart := calCreateStart
+	origEnd := calCreateEnd
+	origAllDay := calCreateAllDay
+	origFormat := formatFlag
+	origQuiet := quietFlag
+
+	calCreateTitle = "All Day Event"
+	calCreateStart = futureDate.Format("2006-01-02")
+	calCreateEnd = ""
+	calCreateAllDay = true
+	formatFlag = "plain"
+	quietFlag = true
+
+	defer func() {
+		calCreateTitle = origTitle
+		calCreateStart = origStart
+		calCreateEnd = origEnd
+		calCreateAllDay = origAllDay
+		formatFlag = origFormat
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalCreate(cmd, []string{})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunCalCreate_InvalidStartTime(t *testing.T) {
+	mockRepo := &MockEventRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origTitle := calCreateTitle
+	origStart := calCreateStart
+
+	calCreateTitle = "Test Event"
+	calCreateStart = "invalid-date"
+
+	defer func() {
+		calCreateTitle = origTitle
+		calCreateStart = origStart
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalCreate(cmd, []string{})
+
+	if err == nil {
+		t.Error("expected error for invalid start time")
+	}
+	if !contains(err.Error(), "invalid start time") {
+		t.Errorf("expected 'invalid start time' error, got: %v", err)
+	}
+}
+
+func TestRunCalCreate_StartAfterEnd(t *testing.T) {
+	mockRepo := &MockEventRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origTitle := calCreateTitle
+	origStart := calCreateStart
+	origEnd := calCreateEnd
+
+	calCreateTitle = "Test Event"
+	calCreateStart = "2024-01-15 15:00"
+	calCreateEnd = "2024-01-15 14:00"
+
+	defer func() {
+		calCreateTitle = origTitle
+		calCreateStart = origStart
+		calCreateEnd = origEnd
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalCreate(cmd, []string{})
+
+	if err == nil {
+		t.Error("expected error for start time after end time")
+	}
+	if !contains(err.Error(), "start time must be before end time") {
+		t.Errorf("expected time ordering error, got: %v", err)
+	}
+}
+
+func TestRunCalCreate_RepositoryError(t *testing.T) {
+	// Use future date
+	futureDate := time.Now().AddDate(0, 1, 0)
+
+	mockRepo := &MockEventRepository{
+		CreateErr: fmt.Errorf("API error: calendar not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origTitle := calCreateTitle
+	origStart := calCreateStart
+	origEnd := calCreateEnd
+
+	calCreateTitle = "Test Event"
+	calCreateStart = futureDate.Format("2006-01-02 15:04")
+	calCreateEnd = futureDate.Add(time.Hour).Format("2006-01-02 15:04")
+
+	defer func() {
+		calCreateTitle = origTitle
+		calCreateStart = origStart
+		calCreateEnd = origEnd
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalCreate(cmd, []string{})
+
+	if err == nil {
+		t.Error("expected error from repository")
+	}
+	if !contains(err.Error(), "failed to create event") {
+		t.Errorf("expected create error, got: %v", err)
+	}
+}
+
+func TestRunCalUpdate_Success(t *testing.T) {
+	existingEvent := &calendar.Event{
+		ID:    "event-123",
+		Title: "Original Title",
+		Start: time.Now(),
+		End:   time.Now().Add(time.Hour),
+	}
+
+	updatedEvent := &calendar.Event{
+		ID:       "event-123",
+		Title:    "Updated Title",
+		Start:    time.Now(),
+		End:      time.Now().Add(time.Hour),
+		HTMLLink: "https://calendar.google.com/event?eid=xyz",
+	}
+
+	mockRepo := &MockEventRepository{
+		Event:        existingEvent,
+		UpdateResult: updatedEvent,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origTitle := calUpdateTitle
+	origCalendar := calUpdateCalendar
+	origFormat := formatFlag
+	origQuiet := quietFlag
+
+	calUpdateTitle = "Updated Title"
+	calUpdateCalendar = "primary"
+	formatFlag = "plain"
+	quietFlag = false
+
+	defer func() {
+		calUpdateTitle = origTitle
+		calUpdateCalendar = origCalendar
+		formatFlag = origFormat
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalUpdate(cmd, []string{"event-123"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Updated Title") {
+		t.Error("expected output to contain updated title")
+	}
+}
+
+func TestRunCalUpdate_EventNotFound(t *testing.T) {
+	mockRepo := &MockEventRepository{
+		GetErr: fmt.Errorf("event not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origCalendar := calUpdateCalendar
+	calUpdateCalendar = "primary"
+	defer func() { calUpdateCalendar = origCalendar }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalUpdate(cmd, []string{"nonexistent"})
+
+	if err == nil {
+		t.Error("expected error for nonexistent event")
+	}
+	if !contains(err.Error(), "failed to get event") {
+		t.Errorf("expected get error, got: %v", err)
+	}
+}
+
+func TestRunCalUpdate_InvalidTimeRange(t *testing.T) {
+	existingEvent := &calendar.Event{
+		ID:    "event-123",
+		Title: "Test Event",
+		Start: time.Now(),
+		End:   time.Now().Add(time.Hour),
+	}
+
+	mockRepo := &MockEventRepository{
+		Event: existingEvent,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origStart := calUpdateStart
+	origEnd := calUpdateEnd
+	origCalendar := calUpdateCalendar
+
+	calUpdateStart = "2024-01-15 15:00"
+	calUpdateEnd = "2024-01-15 14:00"
+	calUpdateCalendar = "primary"
+
+	defer func() {
+		calUpdateStart = origStart
+		calUpdateEnd = origEnd
+		calUpdateCalendar = origCalendar
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalUpdate(cmd, []string{"event-123"})
+
+	if err == nil {
+		t.Error("expected error for invalid time range")
+	}
+	if !contains(err.Error(), "start time must be before end time") {
+		t.Errorf("expected time ordering error, got: %v", err)
+	}
+}
+
+func TestRunCalDelete_Success(t *testing.T) {
+	mockRepo := &MockEventRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origCalendar := calDeleteCalendar
+	origQuiet := quietFlag
+
+	calDeleteCalendar = "primary"
+	quietFlag = false
+
+	defer func() {
+		calDeleteCalendar = origCalendar
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalDelete(cmd, []string{"event-123"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "deleted successfully") {
+		t.Error("expected success message in output")
+	}
+}
+
+func TestRunCalDelete_RepositoryError(t *testing.T) {
+	mockRepo := &MockEventRepository{
+		DeleteErr: fmt.Errorf("event not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origCalendar := calDeleteCalendar
+	calDeleteCalendar = "primary"
+	defer func() { calDeleteCalendar = origCalendar }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalDelete(cmd, []string{"nonexistent"})
+
+	if err == nil {
+		t.Error("expected error from repository")
+	}
+	if !contains(err.Error(), "failed to delete event") {
+		t.Errorf("expected delete error, got: %v", err)
+	}
+}
+
+func TestRunCalDelete_QuietMode(t *testing.T) {
+	mockRepo := &MockEventRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			EventRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origCalendar := calDeleteCalendar
+	origQuiet := quietFlag
+
+	calDeleteCalendar = "primary"
+	quietFlag = true
+
+	defer func() {
+		calDeleteCalendar = origCalendar
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runCalDelete(cmd, []string{"event-123"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Errorf("expected no output in quiet mode, got: %s", output)
 	}
 }

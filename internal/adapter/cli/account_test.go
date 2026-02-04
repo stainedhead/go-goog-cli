@@ -4,6 +4,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -585,4 +586,412 @@ func (m *MockAccountServiceFull) Rename(oldAlias, newAlias string) error {
 		return m.RenameFunc(oldAlias, newAlias)
 	}
 	return m.RenameErr
+}
+
+// TestRunAccountList_Execution tests the runAccountList function with mocks.
+func TestRunAccountList_Execution(t *testing.T) {
+	t.Run("list accounts successfully", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		accounts := []*accountuc.Account{
+			{Alias: "default", Email: "user@example.com", IsDefault: true, Added: time.Now()},
+			{Alias: "work", Email: "work@company.com", IsDefault: false, Added: time.Now()},
+		}
+		mockSvc := &MockAccountService{
+			Accounts: accounts,
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+
+		err := runAccountList(cmd, []string{})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "default") {
+			t.Error("expected output to contain 'default'")
+		}
+		if !contains(output, "user@example.com") {
+			t.Error("expected output to contain 'user@example.com'")
+		}
+	})
+
+	t.Run("no accounts configured", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			Accounts: []*accountuc.Account{},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAccountList(cmd, []string{})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "No accounts configured") {
+			t.Error("expected output to contain 'No accounts configured'")
+		}
+	})
+
+	t.Run("list error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			ListErr: fmt.Errorf("list failed"),
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+		cmd.SetErr(buf)
+
+		err := runAccountList(cmd, []string{})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if !contains(err.Error(), "failed to list accounts") {
+			t.Errorf("expected error to contain 'failed to list accounts', got: %v", err)
+		}
+	})
+}
+
+// TestRunAccountAdd_Execution tests the runAccountAdd function with mocks.
+func TestRunAccountAdd_Execution(t *testing.T) {
+	t.Run("add account successfully", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		addedAccount := &accountuc.Account{
+			Alias:     "work",
+			Email:     "work@company.com",
+			IsDefault: false,
+			Added:     time.Now(),
+		}
+		mockSvc := &MockAccountService{
+			AddResult: addedAccount,
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAccountAdd(cmd, []string{"work"})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "Successfully added account") {
+			t.Error("expected success message")
+		}
+		if !contains(output, "work") {
+			t.Error("expected output to contain 'work'")
+		}
+	})
+
+	t.Run("add error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			AddErr: fmt.Errorf("add failed"),
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAccountAdd(cmd, []string{"work"})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+}
+
+// TestRunAccountRemove_Execution tests the runAccountRemove function with mocks.
+func TestRunAccountRemove_Execution(t *testing.T) {
+	t.Run("remove account successfully", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			Account: &accountuc.Account{
+				Alias: "work",
+				Email: "work@company.com",
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAccountRemove(cmd, []string{"work"})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "Successfully removed account") {
+			t.Error("expected success message")
+		}
+	})
+
+	t.Run("remove error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			Account: &accountuc.Account{
+				Alias: "work",
+				Email: "work@company.com",
+			},
+			RemoveErr: fmt.Errorf("remove failed"),
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAccountRemove(cmd, []string{"work"})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+}
+
+// TestRunAccountSwitch_Execution tests the runAccountSwitch function with mocks.
+func TestRunAccountSwitch_Execution(t *testing.T) {
+	t.Run("switch account successfully", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			Account: &accountuc.Account{
+				Alias: "work",
+				Email: "work@company.com",
+			},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAccountSwitch(cmd, []string{"work"})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "Switched to account") {
+			t.Error("expected success message")
+		}
+	})
+
+	t.Run("switch error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			SwitchErr: fmt.Errorf("switch failed"),
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAccountSwitch(cmd, []string{"work"})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+}
+
+// TestRunAccountShow_Execution tests the runAccountShow function with mocks.
+func TestRunAccountShow_Execution(t *testing.T) {
+	t.Run("show account successfully", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			Account: &accountuc.Account{
+				Alias:     "work",
+				Email:     "work@company.com",
+				IsDefault: true,
+				Added:     time.Now(),
+				Scopes:    []string{"email", "openid"},
+			},
+			TokenManager: &MockTokenManager{},
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAccountShow(cmd, []string{})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "work") {
+			t.Error("expected output to contain alias 'work'")
+		}
+		if !contains(output, "work@company.com") {
+			t.Error("expected output to contain email")
+		}
+	})
+
+	t.Run("resolve error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			ResolveErr: fmt.Errorf("no account found"),
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAccountShow(cmd, []string{})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+}
+
+// TestRunAccountRename_Execution tests the runAccountRename function with mocks.
+func TestRunAccountRename_Execution(t *testing.T) {
+	t.Run("rename account successfully", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		buf := new(bytes.Buffer)
+		cmd.SetOut(buf)
+
+		err := runAccountRename(cmd, []string{"old", "new"})
+
+		// Verify
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		output := buf.String()
+		if !contains(output, "Successfully renamed account") {
+			t.Error("expected success message")
+		}
+	})
+
+	t.Run("rename error", func(t *testing.T) {
+		// Setup
+		ResetDependencies()
+		defer ResetDependencies()
+
+		mockSvc := &MockAccountService{
+			RenameErr: fmt.Errorf("rename failed"),
+		}
+		SetDependencies(&Dependencies{
+			AccountService: mockSvc,
+			RepoFactory:    &MockRepositoryFactory{},
+		})
+
+		// Execute
+		cmd := &cobra.Command{}
+		err := runAccountRename(cmd, []string{"old", "new"})
+
+		// Verify
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
 }

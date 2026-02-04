@@ -188,7 +188,8 @@ func runACLList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	calendarID := args[0]
 
-	repo, err := getACLRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getACLRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -223,7 +224,8 @@ func runACLAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid role %q: must be one of reader, writer, owner, freeBusyReader", aclRole)
 	}
 
-	repo, err := getACLRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getACLRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -263,7 +265,8 @@ func runACLRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("removal requires --confirm flag")
 	}
 
-	repo, err := getACLRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getACLRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}

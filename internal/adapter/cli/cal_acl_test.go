@@ -3,9 +3,12 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
+	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 func TestACLCmd_Help(t *testing.T) {
@@ -625,5 +628,303 @@ func TestACLCmd_SubcommandsRegistered(t *testing.T) {
 		if !found {
 			t.Errorf("expected subcommand %s to be registered with aclCmd", name)
 		}
+	}
+}
+
+// =============================================================================
+// Execution tests for ACL operations
+// =============================================================================
+
+func TestRunACLList_Success(t *testing.T) {
+	mockRules := []*calendar.ACLRule{
+		{ID: "user:test@example.com", Role: "owner", Scope: &calendar.ACLScope{Type: "user", Value: "test@example.com"}},
+		{ID: "user:other@example.com", Role: "reader", Scope: &calendar.ACLScope{Type: "user", Value: "other@example.com"}},
+	}
+
+	mockRepo := &MockACLRepository{
+		Rules: mockRules,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ACLRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "plain"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runACLList(cmd, []string{"primary"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "test@example.com") || !contains(output, "other@example.com") {
+		t.Error("expected output to contain email addresses")
+	}
+}
+
+func TestRunACLList_Error(t *testing.T) {
+	mockRepo := &MockACLRepository{
+		ListErr: fmt.Errorf("API error"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ACLRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runACLList(cmd, []string{"primary"})
+
+	if err == nil {
+		t.Error("expected error from repository")
+	}
+	if !contains(err.Error(), "failed to list ACL rules") {
+		t.Errorf("expected list error, got: %v", err)
+	}
+}
+
+func TestRunACLAdd_Success(t *testing.T) {
+	mockRule := &calendar.ACLRule{
+		ID:    "user:user@example.com",
+		Role:  "reader",
+		Scope: &calendar.ACLScope{Type: "user", Value: "user@example.com"},
+	}
+
+	mockRepo := &MockACLRepository{
+		InsertResult: mockRule,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ACLRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origEmail := aclEmail
+	origRole := aclRole
+	origFormat := formatFlag
+
+	aclEmail = "user@example.com"
+	aclRole = "reader"
+	formatFlag = "plain"
+
+	defer func() {
+		aclEmail = origEmail
+		aclRole = origRole
+		formatFlag = origFormat
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runACLAdd(cmd, []string{"primary"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "user@example.com") {
+		t.Error("expected output to contain email address")
+	}
+	if !contains(output, "reader") {
+		t.Error("expected output to contain role")
+	}
+}
+
+func TestRunACLAdd_InvalidRole(t *testing.T) {
+	mockRepo := &MockACLRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ACLRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origEmail := aclEmail
+	origRole := aclRole
+
+	aclEmail = "user@example.com"
+	aclRole = "invalid-role"
+
+	defer func() {
+		aclEmail = origEmail
+		aclRole = origRole
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runACLAdd(cmd, []string{"primary"})
+
+	if err == nil {
+		t.Error("expected error for invalid role")
+	}
+	if !contains(err.Error(), "invalid role") {
+		t.Errorf("expected invalid role error, got: %v", err)
+	}
+}
+
+func TestRunACLRemove_Success(t *testing.T) {
+	mockRule := &calendar.ACLRule{
+		ID:    "user:user@example.com",
+		Role:  "reader",
+		Scope: &calendar.ACLScope{Type: "user", Value: "user@example.com"},
+	}
+
+	mockRepo := &MockACLRepository{
+		Rule: mockRule,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ACLRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origConfirm := aclConfirm
+	origQuiet := quietFlag
+
+	aclConfirm = true
+	quietFlag = false
+
+	defer func() {
+		aclConfirm = origConfirm
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runACLRemove(cmd, []string{"primary", "user:user@example.com"})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "removed successfully") {
+		t.Error("expected success message in output")
+	}
+}
+
+func TestRunACLRemove_WithoutConfirm(t *testing.T) {
+	mockRepo := &MockACLRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ACLRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origConfirm := aclConfirm
+	aclConfirm = false
+	defer func() { aclConfirm = origConfirm }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runACLRemove(cmd, []string{"primary", "user:user@example.com"})
+
+	if err == nil {
+		t.Error("expected error for missing confirmation")
+	}
+	if !contains(err.Error(), "confirm") {
+		t.Errorf("expected confirm error, got: %v", err)
+	}
+}
+
+func TestRunACLRemove_RuleNotFound(t *testing.T) {
+	mockRepo := &MockACLRepository{
+		GetErr: fmt.Errorf("rule not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			ACLRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origConfirm := aclConfirm
+	aclConfirm = true
+	defer func() { aclConfirm = origConfirm }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runACLRemove(cmd, []string{"primary", "nonexistent"})
+
+	if err == nil {
+		t.Error("expected error for nonexistent rule")
+	}
+	if !contains(err.Error(), "ACL rule not found") {
+		t.Errorf("expected rule not found error, got: %v", err)
 	}
 }

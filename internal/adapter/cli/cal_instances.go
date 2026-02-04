@@ -90,14 +90,11 @@ func runCalInstances(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("start time must be before end time")
 	}
 
-	// Get Calendar service
-	gcalSvc, err := getGCalService(ctx)
+	// Get event repository using dependency injection
+	repo, err := getEventRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
-
-	// Get events repository
-	repo := gcalSvc.Events()
 
 	// Get instances of the recurring event
 	instances, err := repo.Instances(ctx, calInstancesCalendar, eventID, timeMin, timeMax)

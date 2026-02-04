@@ -194,8 +194,8 @@ func runCalCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Get repository
-	repo, err := getGCalEventRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getEventRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -256,8 +256,8 @@ func runCalUpdate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	eventID := args[0]
 
-	// Get repository
-	repo, err := getGCalEventRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getEventRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -341,8 +341,8 @@ func runCalDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	eventID := args[0]
 
-	// Get repository
-	repo, err := getGCalEventRepository(ctx)
+	// Get repository using dependency injection
+	repo, err := getEventRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}

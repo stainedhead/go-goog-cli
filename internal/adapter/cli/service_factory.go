@@ -260,3 +260,10 @@ func getFreeBusyRepositoryFromDeps(ctx context.Context) (FreeBusyRepository, err
 
 	return repo, nil
 }
+
+// getAccountServiceFromDeps returns the account service using injected dependencies.
+// This function supports dependency injection for testing.
+func getAccountServiceFromDeps() AccountService {
+	deps := GetDependencies()
+	return deps.AccountService
+}

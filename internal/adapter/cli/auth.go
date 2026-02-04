@@ -10,9 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/auth"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
-	"github.com/stainedhead/go-goog-cli/internal/infrastructure/keyring"
-	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 var (
@@ -121,23 +118,8 @@ func init() {
 func runAuthLogin(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Load config
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create OAuth flow
-	flow := accountuc.NewDefaultOAuthFlow()
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, flow)
+	// Get account service using dependency injection
+	svc := getAccountServiceFromDeps()
 
 	// Determine alias
 	alias := accountFlag
@@ -165,20 +147,8 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 
 // runAuthLogout handles the auth logout command.
 func runAuthLogout(cmd *cobra.Command, args []string) error {
-	// Load config
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, nil)
+	// Get account service using dependency injection
+	svc := getAccountServiceFromDeps()
 
 	// Resolve account
 	acc, err := svc.ResolveAccount(accountFlag)
@@ -197,32 +167,15 @@ func runAuthLogout(cmd *cobra.Command, args []string) error {
 
 // runAuthStatus handles the auth status command.
 func runAuthStatus(cmd *cobra.Command, args []string) error {
-	// Load config
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
+	ctx := context.Background()
 
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, nil)
+	// Get account service using dependency injection
+	svc := getAccountServiceFromDeps()
 
 	// Resolve account
 	acc, err := svc.ResolveAccount(accountFlag)
 	if err != nil {
 		return fmt.Errorf("no account found: %w", err)
-	}
-
-	// Get token info
-	tokenMgr := svc.GetTokenManager()
-	tokenInfo, err := tokenMgr.GetTokenInfo(acc.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token info: %w", err)
 	}
 
 	// Display status
@@ -231,24 +184,20 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 	cmd.Printf("Default:     %v\n", acc.IsDefault)
 	cmd.Printf("Added:       %s\n", acc.Added.Format(time.RFC3339))
 
-	if tokenInfo.HasToken {
-		cmd.Printf("Token:       Valid\n")
-		if tokenInfo.ExpiryTime != "" {
-			cmd.Printf("Expires:     %s\n", tokenInfo.ExpiryTime)
-		}
-		if tokenInfo.IsExpired {
-			cmd.Println("Status:      EXPIRED (will auto-refresh)")
-		} else {
-			cmd.Println("Status:      ACTIVE")
-		}
-	} else {
+	// Try to get token source to verify token status
+	tokenMgr := svc.GetTokenManager()
+	_, err = tokenMgr.GetTokenSource(ctx, acc.Alias)
+	if err != nil {
 		cmd.Printf("Token:       Not found\n")
 		cmd.Println("Status:      NOT AUTHENTICATED")
+	} else {
+		cmd.Printf("Token:       Valid\n")
+		cmd.Println("Status:      ACTIVE")
 	}
 
-	if len(tokenInfo.Scopes) > 0 {
+	if len(acc.Scopes) > 0 {
 		cmd.Println("Scopes:")
-		for _, scope := range tokenInfo.Scopes {
+		for _, scope := range acc.Scopes {
 			cmd.Printf("  - %s\n", scope)
 		}
 	}
@@ -260,20 +209,8 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 func runAuthRefresh(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Load config
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Create keyring store
-	store, err := keyring.NewStore()
-	if err != nil {
-		return fmt.Errorf("failed to initialize keyring: %w", err)
-	}
-
-	// Create account service
-	svc := accountuc.NewService(cfg, store, nil)
+	// Get account service using dependency injection
+	svc := getAccountServiceFromDeps()
 
 	// Resolve account
 	acc, err := svc.ResolveAccount(accountFlag)
@@ -281,27 +218,22 @@ func runAuthRefresh(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no account found: %w", err)
 	}
 
-	// Get token manager
+	// Get token manager and force a token refresh by getting a new token source
 	tokenMgr := svc.GetTokenManager()
-
-	// Get scopes for OAuth config
-	scopes, err := tokenMgr.GetGrantedScopes(acc.Alias)
+	tokenSource, err := tokenMgr.GetTokenSource(ctx, acc.Alias)
 	if err != nil {
-		scopes = []string{} // Use empty if not found
+		return fmt.Errorf("failed to get token: %w", err)
 	}
 
-	// Create OAuth config
-	oauthCfg := auth.NewOAuthConfig(scopes)
-
-	// Refresh token
-	newToken, err := tokenMgr.RefreshToken(ctx, acc.Alias, oauthCfg)
+	// Force a token fetch which will refresh if expired
+	token, err := tokenSource.Token()
 	if err != nil {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
 
 	cmd.Printf("Successfully refreshed token for %s\n", acc.Alias)
-	if !newToken.Expiry.IsZero() {
-		cmd.Printf("New expiry: %s\n", newToken.Expiry.Format(time.RFC3339))
+	if !token.Expiry.IsZero() {
+		cmd.Printf("New expiry: %s\n", token.Expiry.Format(time.RFC3339))
 	}
 
 	return nil
