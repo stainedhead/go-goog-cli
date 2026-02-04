@@ -3,9 +3,12 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 )
 
 func TestMailActionsCmd_Help(t *testing.T) {
@@ -802,5 +805,1438 @@ func TestMailMarkCmd_HasFlags(t *testing.T) {
 		if flag == nil {
 			t.Errorf("expected --%s flag to be defined on mark command", flagName)
 		}
+	}
+}
+
+// =============================================================================
+// Tests using dependency injection with mocks
+// =============================================================================
+
+func TestRunMailList_WithMockDependencies(t *testing.T) {
+	// Setup mock dependencies
+	mockMessages := []*mail.Message{
+		{ID: "msg1", Subject: "Test Subject 1", From: "sender1@example.com"},
+		{ID: "msg2", Subject: "Test Subject 2", From: "sender2@example.com"},
+	}
+
+	mockRepo := &MockMessageRepository{
+		Messages: mockMessages,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account: &accountuc.Account{
+				Alias: "test",
+				Email: "test@example.com",
+			},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	// Save and restore global flags
+	origFormat := formatFlag
+	origMaxResults := mailListMaxResults
+	origLabels := mailListLabels
+	origUnreadOnly := mailListUnreadOnly
+	formatFlag = "plain"
+	mailListMaxResults = 10
+	mailListLabels = []string{"INBOX"}
+	mailListUnreadOnly = false
+	defer func() {
+		formatFlag = origFormat
+		mailListMaxResults = origMaxResults
+		mailListLabels = origLabels
+		mailListUnreadOnly = origUnreadOnly
+	}()
+
+	// Create command and capture output
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailList(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runMailList failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg1") || !contains(output, "msg2") {
+		t.Errorf("expected output to contain message IDs, got: %s", output)
+	}
+}
+
+func TestRunMailList_WithUnreadOnly(t *testing.T) {
+	mockMessages := []*mail.Message{
+		{ID: "unread1", Subject: "Unread Message", From: "sender@example.com"},
+	}
+
+	mockRepo := &MockMessageRepository{
+		Messages: mockMessages,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origUnreadOnly := mailListUnreadOnly
+	formatFlag = "plain"
+	mailListUnreadOnly = true
+	defer func() {
+		formatFlag = origFormat
+		mailListUnreadOnly = origUnreadOnly
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailList(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runMailList failed: %v", err)
+	}
+}
+
+func TestRunMailList_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		ListErr: fmt.Errorf("API error"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailList(cmd, []string{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to list messages") {
+		t.Errorf("expected error to contain 'failed to list messages', got: %v", err)
+	}
+}
+
+func TestRunMailRead_WithMockDependencies(t *testing.T) {
+	mockMessage := &mail.Message{
+		ID:      "msg123",
+		Subject: "Test Email Subject",
+		From:    "sender@example.com",
+		To:      []string{"recipient@example.com"},
+		Body:    "This is the test email body.",
+	}
+
+	mockRepo := &MockMessageRepository{
+		Message: mockMessage,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "plain"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailRead(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailRead failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "Test Email Subject") {
+		t.Errorf("expected output to contain subject, got: %s", output)
+	}
+	if !contains(output, "Message Body") {
+		t.Errorf("expected output to contain 'Message Body', got: %s", output)
+	}
+}
+
+func TestRunMailRead_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		GetErr: fmt.Errorf("message not found"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailRead(cmd, []string{"nonexistent"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to read message") {
+		t.Errorf("expected error to contain 'failed to read message', got: %v", err)
+	}
+}
+
+func TestRunMailSearch_WithMockDependencies(t *testing.T) {
+	mockMessages := []*mail.Message{
+		{ID: "search1", Subject: "Meeting Tomorrow", From: "boss@example.com"},
+		{ID: "search2", Subject: "Meeting Update", From: "boss@example.com"},
+	}
+
+	mockRepo := &MockMessageRepository{
+		SearchResult: &mail.ListResult[*mail.Message]{
+			Items: mockMessages,
+			Total: 2,
+		},
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origQuiet := quietFlag
+	formatFlag = "plain"
+	quietFlag = false
+	defer func() {
+		formatFlag = origFormat
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailSearch(cmd, []string{"from:boss@example.com"})
+	if err != nil {
+		t.Fatalf("runMailSearch failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "search1") || !contains(output, "search2") {
+		t.Errorf("expected output to contain search results, got: %s", output)
+	}
+}
+
+func TestRunMailSearch_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		SearchErr: fmt.Errorf("search failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailSearch(cmd, []string{"invalid query"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to search messages") {
+		t.Errorf("expected error to contain 'failed to search messages', got: %v", err)
+	}
+}
+
+func TestRunMailTrash_WithMockDependencies(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = false
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailTrash(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailTrash failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg123") || !contains(output, "trash") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunMailTrash_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		TrashErr: fmt.Errorf("trash operation failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailTrash(cmd, []string{"msg123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to trash message") {
+		t.Errorf("expected error to contain 'failed to trash message', got: %v", err)
+	}
+}
+
+func TestRunMailUntrash_WithMockDependencies(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = false
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailUntrash(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailUntrash failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg123") || !contains(output, "restored") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunMailUntrash_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		UntrashErr: fmt.Errorf("untrash operation failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailUntrash(cmd, []string{"msg123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to restore message") {
+		t.Errorf("expected error to contain 'failed to restore message', got: %v", err)
+	}
+}
+
+func TestRunMailArchive_WithMockDependencies(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = false
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailArchive(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailArchive failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg123") || !contains(output, "archived") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunMailArchive_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		ArchiveErr: fmt.Errorf("archive operation failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailArchive(cmd, []string{"msg123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to archive message") {
+		t.Errorf("expected error to contain 'failed to archive message', got: %v", err)
+	}
+}
+
+func TestRunMailDelete_WithMockDependencies(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = false
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailDelete(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailDelete failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg123") || !contains(output, "deleted") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunMailDelete_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		DeleteErr: fmt.Errorf("delete operation failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailDelete(cmd, []string{"msg123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to delete message") {
+		t.Errorf("expected error to contain 'failed to delete message', got: %v", err)
+	}
+}
+
+func TestRunMailModify_WithMockDependencies(t *testing.T) {
+	mockMessage := &mail.Message{
+		ID:     "msg123",
+		Labels: []string{"INBOX", "IMPORTANT"},
+	}
+	mockRepo := &MockMessageRepository{
+		ModifyResult: mockMessage,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origVerbose := verboseFlag
+	origAddLabels := mailModifyAddLabels
+	origRemoveLabels := mailModifyRemoveLabels
+	quietFlag = false
+	verboseFlag = true
+	mailModifyAddLabels = []string{"IMPORTANT"}
+	mailModifyRemoveLabels = []string{"INBOX"}
+	defer func() {
+		quietFlag = origQuiet
+		verboseFlag = origVerbose
+		mailModifyAddLabels = origAddLabels
+		mailModifyRemoveLabels = origRemoveLabels
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailModify(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailModify failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg123") || !contains(output, "modified") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunMailModify_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		ModifyErr: fmt.Errorf("modify operation failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origAddLabels := mailModifyAddLabels
+	mailModifyAddLabels = []string{"IMPORTANT"}
+	defer func() { mailModifyAddLabels = origAddLabels }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailModify(cmd, []string{"msg123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to modify message") {
+		t.Errorf("expected error to contain 'failed to modify message', got: %v", err)
+	}
+}
+
+func TestRunMailMark_MarkAsRead(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origRead := mailMarkRead
+	origUnread := mailMarkUnread
+	origStar := mailMarkStar
+	origUnstar := mailMarkUnstar
+	quietFlag = false
+	mailMarkRead = true
+	mailMarkUnread = false
+	mailMarkStar = false
+	mailMarkUnstar = false
+	defer func() {
+		quietFlag = origQuiet
+		mailMarkRead = origRead
+		mailMarkUnread = origUnread
+		mailMarkStar = origStar
+		mailMarkUnstar = origUnstar
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMark(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailMark failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg123") || !contains(output, "read") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunMailMark_StarMessage(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origRead := mailMarkRead
+	origUnread := mailMarkUnread
+	origStar := mailMarkStar
+	origUnstar := mailMarkUnstar
+	quietFlag = false
+	mailMarkRead = false
+	mailMarkUnread = false
+	mailMarkStar = true
+	mailMarkUnstar = false
+	defer func() {
+		quietFlag = origQuiet
+		mailMarkRead = origRead
+		mailMarkUnread = origUnread
+		mailMarkStar = origStar
+		mailMarkUnstar = origUnstar
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMark(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailMark failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg123") || !contains(output, "starred") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+}
+
+func TestRunMailMark_MultipleActions(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origRead := mailMarkRead
+	origUnread := mailMarkUnread
+	origStar := mailMarkStar
+	origUnstar := mailMarkUnstar
+	quietFlag = false
+	mailMarkRead = true
+	mailMarkUnread = false
+	mailMarkStar = true
+	mailMarkUnstar = false
+	defer func() {
+		quietFlag = origQuiet
+		mailMarkRead = origRead
+		mailMarkUnread = origUnread
+		mailMarkStar = origStar
+		mailMarkUnstar = origUnstar
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMark(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailMark failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "msg123") {
+		t.Errorf("expected confirmation message, got: %s", output)
+	}
+	if !contains(output, "read") || !contains(output, "starred") {
+		t.Errorf("expected both read and starred in output, got: %s", output)
+	}
+}
+
+func TestRunMailMark_Error(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		ModifyErr: fmt.Errorf("mark operation failed"),
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origRead := mailMarkRead
+	mailMarkRead = true
+	defer func() { mailMarkRead = origRead }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMark(cmd, []string{"msg123"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "failed to mark message") {
+		t.Errorf("expected error to contain 'failed to mark message', got: %v", err)
+	}
+}
+
+func TestRunMailList_QuietMode(t *testing.T) {
+	mockMessages := []*mail.Message{
+		{ID: "msg1", Subject: "Test Subject 1", From: "sender1@example.com"},
+	}
+
+	mockRepo := &MockMessageRepository{
+		Messages: mockMessages,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origQuiet := quietFlag
+	formatFlag = "plain"
+	quietFlag = true
+	defer func() {
+		formatFlag = origFormat
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailList(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runMailList failed: %v", err)
+	}
+}
+
+func TestRunMailSearch_EmptyResults(t *testing.T) {
+	mockRepo := &MockMessageRepository{
+		SearchResult: &mail.ListResult[*mail.Message]{
+			Items: []*mail.Message{},
+			Total: 0,
+		},
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origQuiet := quietFlag
+	formatFlag = "plain"
+	quietFlag = false
+	defer func() {
+		formatFlag = origFormat
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailSearch(cmd, []string{"nonexistent query"})
+	if err != nil {
+		t.Fatalf("runMailSearch failed: %v", err)
+	}
+}
+
+func TestRunMailSearch_WithPagination(t *testing.T) {
+	mockMessages := []*mail.Message{
+		{ID: "msg1", Subject: "Test 1", From: "sender@example.com"},
+	}
+
+	mockRepo := &MockMessageRepository{
+		SearchResult: &mail.ListResult[*mail.Message]{
+			Items: mockMessages,
+			Total: 100, // Total is greater than returned
+		},
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	origQuiet := quietFlag
+	formatFlag = "plain"
+	quietFlag = false
+	defer func() {
+		formatFlag = origFormat
+		quietFlag = origQuiet
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailSearch(cmd, []string{"test query"})
+	if err != nil {
+		t.Fatalf("runMailSearch failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "showing first") {
+		t.Errorf("expected pagination info in output, got: %s", output)
+	}
+}
+
+func TestRunMailList_AccountResolveError(t *testing.T) {
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			ResolveErr: fmt.Errorf("no account found"),
+		},
+		RepoFactory: &MockRepositoryFactory{},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailList(cmd, []string{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !contains(err.Error(), "no account found") {
+		t.Errorf("expected error to contain 'no account found', got: %v", err)
+	}
+}
+
+func TestRunMailTrash_QuietMode(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = true
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailTrash(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailTrash failed: %v", err)
+	}
+
+	output := buf.String()
+	// In quiet mode, should not show message
+	if output != "" {
+		t.Errorf("quiet mode should not produce output, got: %s", output)
+	}
+}
+
+func TestRunMailUntrash_QuietMode(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = true
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailUntrash(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailUntrash failed: %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Errorf("quiet mode should not produce output, got: %s", output)
+	}
+}
+
+func TestRunMailArchive_QuietMode(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = true
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailArchive(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailArchive failed: %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Errorf("quiet mode should not produce output, got: %s", output)
+	}
+}
+
+func TestRunMailDelete_QuietMode(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	quietFlag = true
+	defer func() { quietFlag = origQuiet }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailDelete(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailDelete failed: %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Errorf("quiet mode should not produce output, got: %s", output)
+	}
+}
+
+func TestRunMailModify_QuietMode(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origAddLabels := mailModifyAddLabels
+	quietFlag = true
+	mailModifyAddLabels = []string{"IMPORTANT"}
+	defer func() {
+		quietFlag = origQuiet
+		mailModifyAddLabels = origAddLabels
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailModify(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailModify failed: %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Errorf("quiet mode should not produce output, got: %s", output)
+	}
+}
+
+func TestRunMailMark_QuietMode(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origRead := mailMarkRead
+	quietFlag = true
+	mailMarkRead = true
+	defer func() {
+		quietFlag = origQuiet
+		mailMarkRead = origRead
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMark(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailMark failed: %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Errorf("quiet mode should not produce output, got: %s", output)
+	}
+}
+
+func TestRunMailMark_MarkAsUnread(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origRead := mailMarkRead
+	origUnread := mailMarkUnread
+	origStar := mailMarkStar
+	origUnstar := mailMarkUnstar
+	quietFlag = false
+	mailMarkRead = false
+	mailMarkUnread = true
+	mailMarkStar = false
+	mailMarkUnstar = false
+	defer func() {
+		quietFlag = origQuiet
+		mailMarkRead = origRead
+		mailMarkUnread = origUnread
+		mailMarkStar = origStar
+		mailMarkUnstar = origUnstar
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMark(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailMark failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "unread") {
+		t.Errorf("expected output to contain 'unread', got: %s", output)
+	}
+}
+
+func TestRunMailMark_Unstar(t *testing.T) {
+	mockRepo := &MockMessageRepository{}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origQuiet := quietFlag
+	origRead := mailMarkRead
+	origUnread := mailMarkUnread
+	origStar := mailMarkStar
+	origUnstar := mailMarkUnstar
+	quietFlag = false
+	mailMarkRead = false
+	mailMarkUnread = false
+	mailMarkStar = false
+	mailMarkUnstar = true
+	defer func() {
+		quietFlag = origQuiet
+		mailMarkRead = origRead
+		mailMarkUnread = origUnread
+		mailMarkStar = origStar
+		mailMarkUnstar = origUnstar
+	}()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailMark(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailMark failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "unstarred") {
+		t.Errorf("expected output to contain 'unstarred', got: %s", output)
+	}
+}
+
+func TestRunMailRead_JSONFormat(t *testing.T) {
+	mockMessage := &mail.Message{
+		ID:      "msg123",
+		Subject: "JSON Test Subject",
+		From:    "sender@example.com",
+		To:      []string{"recipient@example.com"},
+	}
+
+	mockRepo := &MockMessageRepository{
+		Message: mockMessage,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "json"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailRead(cmd, []string{"msg123"})
+	if err != nil {
+		t.Fatalf("runMailRead failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "JSON Test Subject") {
+		t.Errorf("expected JSON output to contain subject, got: %s", output)
+	}
+}
+
+func TestRunMailList_JSONFormat(t *testing.T) {
+	mockMessages := []*mail.Message{
+		{ID: "msg1", Subject: "JSON List Test", From: "sender@example.com"},
+	}
+
+	mockRepo := &MockMessageRepository{
+		Messages: mockMessages,
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "json"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailList(cmd, []string{})
+	if err != nil {
+		t.Fatalf("runMailList failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "JSON List Test") {
+		t.Errorf("expected JSON output to contain subject, got: %s", output)
+	}
+}
+
+func TestRunMailSearch_JSONFormat(t *testing.T) {
+	mockMessages := []*mail.Message{
+		{ID: "msg1", Subject: "JSON Search Test", From: "sender@example.com"},
+	}
+
+	mockRepo := &MockMessageRepository{
+		SearchResult: &mail.ListResult[*mail.Message]{
+			Items: mockMessages,
+			Total: 1,
+		},
+	}
+
+	deps := &Dependencies{
+		AccountService: &MockAccountService{
+			Account:      &accountuc.Account{Alias: "test", Email: "test@example.com"},
+			TokenManager: &MockTokenManager{},
+		},
+		RepoFactory: &MockRepositoryFactory{
+			MessageRepo: mockRepo,
+		},
+	}
+
+	SetDependencies(deps)
+	defer ResetDependencies()
+
+	origFormat := formatFlag
+	formatFlag = "json"
+	defer func() { formatFlag = origFormat }()
+
+	cmd := &cobra.Command{Use: "test"}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := runMailSearch(cmd, []string{"test"})
+	if err != nil {
+		t.Fatalf("runMailSearch failed: %v", err)
+	}
+
+	output := buf.String()
+	if !contains(output, "JSON Search Test") {
+		t.Errorf("expected JSON output to contain subject, got: %s", output)
 	}
 }

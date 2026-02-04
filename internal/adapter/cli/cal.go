@@ -134,14 +134,11 @@ func init() {
 func runCalList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get Calendar service (defined in cal_utils.go)
-	gcalSvc, err := getGCalService(ctx)
+	// Get event repository using dependency injection
+	repo, err := getEventRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
-
-	// Get events repository
-	repo := gcalSvc.Events()
 
 	// Calculate time range (now to 30 days from now)
 	now := time.Now()
@@ -174,14 +171,11 @@ func runCalShow(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	eventID := args[0]
 
-	// Get Calendar service (defined in cal_utils.go)
-	gcalSvc, err := getGCalService(ctx)
+	// Get event repository using dependency injection
+	repo, err := getEventRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
-
-	// Get events repository
-	repo := gcalSvc.Events()
 
 	// Get the event
 	event, err := repo.Get(ctx, calCalendarFlag, eventID)
@@ -203,14 +197,11 @@ func runCalShow(cmd *cobra.Command, args []string) error {
 func runCalToday(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get Calendar service (defined in cal_utils.go)
-	gcalSvc, err := getGCalService(ctx)
+	// Get event repository using dependency injection
+	repo, err := getEventRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
-
-	// Get events repository
-	repo := gcalSvc.Events()
 
 	// Calculate today's time range
 	now := time.Now()
@@ -243,14 +234,11 @@ func runCalToday(cmd *cobra.Command, args []string) error {
 func runCalWeek(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get Calendar service (defined in cal_utils.go)
-	gcalSvc, err := getGCalService(ctx)
+	// Get event repository using dependency injection
+	repo, err := getEventRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
-
-	// Get events repository
-	repo := gcalSvc.Events()
 
 	// Calculate this week's time range (Monday to Sunday)
 	now := time.Now()

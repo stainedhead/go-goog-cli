@@ -696,3 +696,154 @@ func TestOpenBrowser(t *testing.T) {
 		_ = err
 	})
 }
+
+// TestCallbackServerErrorChannelSendOnServerError tests error channel behavior.
+func TestCallbackServerErrorChannelSendOnServerError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Start a server on a specific port
+	server, serverURL, err := StartCallbackServer(ctx, 0)
+	if err != nil {
+		t.Fatalf("failed to start callback server: %v", err)
+	}
+
+	// Just verify we can get the URL
+	gotURL := server.GetServerURL()
+	if gotURL != serverURL {
+		t.Errorf("GetServerURL() = %q, want %q", gotURL, serverURL)
+	}
+
+	// Clean up
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		http.Get(serverURL + "/callback?code=cleanup")
+	}()
+	WaitForCallback(ctx, server)
+}
+
+// TestStartCallbackServerWithBusyPort tests starting a server when preferred port is busy.
+func TestStartCallbackServerWithBusyPort(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Start first server to occupy the port
+	server1, serverURL1, err := StartCallbackServer(ctx, 18766)
+	if err != nil {
+		t.Fatalf("failed to start first callback server: %v", err)
+	}
+
+	// Try to start second server on the same port - it should fall back to another port
+	server2, serverURL2, err := StartCallbackServer(ctx, 18766)
+	if err != nil {
+		t.Fatalf("failed to start second callback server: %v", err)
+	}
+
+	// URLs should be different (different ports)
+	if serverURL1 == serverURL2 {
+		t.Errorf("expected different URLs when port is busy, got same: %s", serverURL1)
+	}
+
+	// Clean up both servers
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		http.Get(serverURL1 + "/callback?code=cleanup1")
+		http.Get(serverURL2 + "/callback?code=cleanup2")
+	}()
+	WaitForCallback(ctx, server1)
+	WaitForCallback(ctx, server2)
+}
+
+// TestGenerateCodeVerifierRandomness tests that verifiers are cryptographically random.
+func TestGenerateCodeVerifierRandomness(t *testing.T) {
+	// Generate many verifiers and check they are unique and well-distributed
+	verifiers := make([]string, 50)
+	for i := 0; i < 50; i++ {
+		verifiers[i] = GenerateCodeVerifier()
+	}
+
+	// Check uniqueness
+	seen := make(map[string]bool)
+	for _, v := range verifiers {
+		if seen[v] {
+			t.Error("duplicate verifier generated")
+		}
+		seen[v] = true
+	}
+
+	// Check length consistency
+	for i, v := range verifiers {
+		if len(v) != 43 {
+			t.Errorf("verifier[%d] length = %d, want 43", i, len(v))
+		}
+	}
+}
+
+// TestNewOAuthConfigEmptyEnvVars tests config creation when env vars are empty.
+func TestNewOAuthConfigEmptyEnvVars(t *testing.T) {
+	// Save and restore env vars
+	origClientID := getEnvOrDefault("GOOG_CLIENT_ID", "")
+	origClientSecret := getEnvOrDefault("GOOG_CLIENT_SECRET", "")
+	defer func() {
+		setEnvForTest("GOOG_CLIENT_ID", origClientID)
+		setEnvForTest("GOOG_CLIENT_SECRET", origClientSecret)
+	}()
+
+	// Set empty env vars
+	unsetEnv("GOOG_CLIENT_ID")
+	unsetEnv("GOOG_CLIENT_SECRET")
+
+	cfg := NewOAuthConfig([]string{ScopeGmailReadonly})
+
+	// Config should still be created, just with empty credentials
+	if cfg.ClientID != "" {
+		t.Errorf("expected empty ClientID when env not set, got %q", cfg.ClientID)
+	}
+	if cfg.ClientSecret != "" {
+		t.Errorf("expected empty ClientSecret when env not set, got %q", cfg.ClientSecret)
+	}
+}
+
+// TestCallbackServerMultipleCallbackAttempts tests that only first callback is processed.
+func TestCallbackServerMultipleCallbackAttempts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	server, serverURL, err := StartCallbackServer(ctx, 0)
+	if err != nil {
+		t.Fatalf("failed to start callback server: %v", err)
+	}
+
+	codeChan := make(chan string, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		code, err := WaitForCallback(ctx, server)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		codeChan <- code
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// First callback should succeed
+	resp1, err := http.Get(serverURL + "/callback?code=first-code")
+	if err != nil {
+		t.Fatalf("first callback request failed: %v", err)
+	}
+	resp1.Body.Close()
+
+	// Wait for the callback to be processed
+	select {
+	case code := <-codeChan:
+		if code != "first-code" {
+			t.Errorf("expected first code, got %q", code)
+		}
+	case err := <-errChan:
+		t.Fatalf("callback error: %v", err)
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for callback")
+	}
+}

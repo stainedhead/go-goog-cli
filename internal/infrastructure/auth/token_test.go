@@ -796,3 +796,260 @@ func TestHasScopeEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+// TestDeleteTokenErrorPaths tests error handling in DeleteToken.
+func TestDeleteTokenErrorPaths(t *testing.T) {
+	t.Run("returns error when store delete fails", func(t *testing.T) {
+		customErr := customError("delete failed")
+		store := &errorStore{deleteErr: customErr}
+		manager := NewTokenManager(store)
+
+		err := manager.DeleteToken("any@example.com")
+		if err == nil {
+			t.Error("expected error from store")
+		}
+	})
+}
+
+// TestRefreshTokenErrorPaths tests error handling in RefreshToken.
+func TestRefreshTokenErrorPaths(t *testing.T) {
+	t.Run("returns error when token not found", func(t *testing.T) {
+		store := newMockStore()
+		manager := NewTokenManager(store)
+
+		ctx := context.Background()
+		cfg := &oauth2.Config{}
+
+		_, err := manager.RefreshToken(ctx, "nonexistent@example.com", cfg)
+		if err == nil {
+			t.Error("expected error for non-existent token")
+		}
+	})
+}
+
+// TestGetTokenSourceWithoutScopes tests GetTokenSource when scopes are not stored.
+func TestGetTokenSourceWithoutScopes(t *testing.T) {
+	store := newMockStore()
+	manager := NewTokenManager(store)
+
+	account := "noscopes@example.com"
+	token := &oauth2.Token{
+		AccessToken:  "valid-access-token",
+		TokenType:    "Bearer",
+		RefreshToken: "refresh-token",
+		Expiry:       time.Now().Add(time.Hour),
+	}
+
+	if err := manager.SaveToken(account, token); err != nil {
+		t.Fatalf("SaveToken failed: %v", err)
+	}
+	// Don't save any scopes
+
+	// Save and restore env vars
+	origClientID := getEnvOrDefault("GOOG_CLIENT_ID", "")
+	origClientSecret := getEnvOrDefault("GOOG_CLIENT_SECRET", "")
+	defer func() {
+		setEnvForTest("GOOG_CLIENT_ID", origClientID)
+		setEnvForTest("GOOG_CLIENT_SECRET", origClientSecret)
+	}()
+
+	setEnvForTest("GOOG_CLIENT_ID", "test-client-id")
+	setEnvForTest("GOOG_CLIENT_SECRET", "test-client-secret")
+
+	ctx := context.Background()
+
+	// Should still work even without scopes
+	ts, err := manager.GetTokenSource(ctx, account)
+	if err != nil {
+		t.Fatalf("GetTokenSource failed: %v", err)
+	}
+
+	gotToken, err := ts.Token()
+	if err != nil {
+		t.Fatalf("Token() failed: %v", err)
+	}
+
+	if gotToken.AccessToken != token.AccessToken {
+		t.Errorf("expected access token %q, got %q", token.AccessToken, gotToken.AccessToken)
+	}
+}
+
+// TestGetTokenInfoWithZeroExpiry tests GetTokenInfo when token has zero expiry.
+func TestGetTokenInfoWithZeroExpiry(t *testing.T) {
+	store := newMockStore()
+	manager := NewTokenManager(store)
+
+	account := "zeroexpiry@example.com"
+	token := &oauth2.Token{
+		AccessToken:  "test-access-token",
+		TokenType:    "Bearer",
+		RefreshToken: "test-refresh-token",
+		// No expiry set (zero value)
+	}
+	if err := manager.SaveToken(account, token); err != nil {
+		t.Fatalf("SaveToken failed: %v", err)
+	}
+
+	info, err := manager.GetTokenInfo(account)
+	if err != nil {
+		t.Fatalf("GetTokenInfo failed: %v", err)
+	}
+
+	if !info.HasToken {
+		t.Error("expected HasToken to be true")
+	}
+	if info.ExpiryTime != "" {
+		t.Errorf("expected empty ExpiryTime for zero expiry, got %q", info.ExpiryTime)
+	}
+}
+
+// TestLoadTokenWrapsStoreError tests that LoadToken wraps non-key-not-found errors.
+func TestLoadTokenWrapsStoreError(t *testing.T) {
+	customErr := customError("some other error")
+	store := &errorStore{getErr: customErr}
+	manager := NewTokenManager(store)
+
+	_, err := manager.LoadToken("any@example.com")
+	if err == nil {
+		t.Error("expected error from store")
+	}
+	// Should return ErrTokenNotFound for our mock since it matches "key not found"
+}
+
+// TestGetGrantedScopesWrapsStoreError tests error wrapping in GetGrantedScopes.
+func TestGetGrantedScopesWrapsStoreError(t *testing.T) {
+	customErr := customError("some other error")
+	store := &errorStore{getErr: customErr}
+	manager := NewTokenManager(store)
+
+	_, err := manager.GetGrantedScopes("any@example.com")
+	if err == nil {
+		t.Error("expected error from store")
+	}
+}
+
+// TestGetTokenInfoWithStoreError tests GetTokenInfo when store returns error.
+func TestGetTokenInfoWithStoreError(t *testing.T) {
+	customErr := customError("some store error")
+	store := &errorStore{getErr: customErr}
+	manager := NewTokenManager(store)
+
+	_, err := manager.GetTokenInfo("any@example.com")
+	if err == nil {
+		t.Error("expected error from store")
+	}
+}
+
+// errorStoreWithScopeErr allows separate errors for different keys.
+type errorStoreWithScopeErr struct {
+	mockStore *mockStore
+	scopeErr  error
+}
+
+func (s *errorStoreWithScopeErr) Set(account, key string, value []byte) error {
+	return s.mockStore.Set(account, key, value)
+}
+
+func (s *errorStoreWithScopeErr) Get(account, key string) ([]byte, error) {
+	if key == KeyScopes && s.scopeErr != nil {
+		return nil, s.scopeErr
+	}
+	return s.mockStore.Get(account, key)
+}
+
+func (s *errorStoreWithScopeErr) Delete(account, key string) error {
+	return s.mockStore.Delete(account, key)
+}
+
+func (s *errorStoreWithScopeErr) List(account string) ([]string, error) {
+	return s.mockStore.List(account)
+}
+
+// TestGetTokenInfoWithScopesError tests GetTokenInfo when scopes lookup fails.
+func TestGetTokenInfoWithScopesError(t *testing.T) {
+	mockStore := newMockStore()
+	store := &errorStoreWithScopeErr{
+		mockStore: mockStore,
+		scopeErr:  customError("scope lookup failed"),
+	}
+	manager := NewTokenManager(store)
+
+	account := "scopeerr@example.com"
+	token := &oauth2.Token{
+		AccessToken:  "test-access-token",
+		TokenType:    "Bearer",
+		RefreshToken: "test-refresh-token",
+		Expiry:       time.Now().Add(time.Hour),
+	}
+	if err := manager.SaveToken(account, token); err != nil {
+		t.Fatalf("SaveToken failed: %v", err)
+	}
+
+	// GetTokenInfo should still succeed even if scopes lookup fails
+	info, err := manager.GetTokenInfo(account)
+	if err != nil {
+		t.Fatalf("GetTokenInfo failed: %v", err)
+	}
+
+	if !info.HasToken {
+		t.Error("expected HasToken to be true")
+	}
+	if len(info.Scopes) != 0 {
+		t.Errorf("expected empty scopes when lookup fails, got %v", info.Scopes)
+	}
+}
+
+// TestRefreshTokenWhenTokenUnchanged tests that refreshed token is not saved when unchanged.
+func TestRefreshTokenWhenTokenUnchanged(t *testing.T) {
+	// Create a mock OAuth server that returns the same access token
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Return same access token as was stored
+		w.Write([]byte(`{
+			"access_token": "same-access-token",
+			"token_type": "Bearer",
+			"expires_in": 3600,
+			"refresh_token": "same-refresh-token"
+		}`))
+	}))
+	defer mockServer.Close()
+
+	store := newMockStore()
+	manager := NewTokenManager(store)
+
+	account := "unchanged@example.com"
+	token := &oauth2.Token{
+		AccessToken:  "same-access-token", // Same as what server returns
+		TokenType:    "Bearer",
+		RefreshToken: "same-refresh-token",
+		Expiry:       time.Now().Add(-time.Hour), // Expired
+	}
+	if err := manager.SaveToken(account, token); err != nil {
+		t.Fatalf("SaveToken failed: %v", err)
+	}
+
+	// Save and restore env vars
+	origClientID := getEnvOrDefault("GOOG_CLIENT_ID", "")
+	origClientSecret := getEnvOrDefault("GOOG_CLIENT_SECRET", "")
+	defer func() {
+		setEnvForTest("GOOG_CLIENT_ID", origClientID)
+		setEnvForTest("GOOG_CLIENT_SECRET", origClientSecret)
+	}()
+
+	setEnvForTest("GOOG_CLIENT_ID", "test-client-id")
+	setEnvForTest("GOOG_CLIENT_SECRET", "test-client-secret")
+
+	ctx := context.Background()
+	cfg := NewOAuthConfig([]string{ScopeGmailReadonly})
+	cfg.Endpoint.TokenURL = mockServer.URL
+
+	newToken, err := manager.RefreshToken(ctx, account, cfg)
+	if err != nil {
+		t.Fatalf("RefreshToken failed: %v", err)
+	}
+
+	if newToken.AccessToken != "same-access-token" {
+		t.Errorf("expected access token 'same-access-token', got %q", newToken.AccessToken)
+	}
+}

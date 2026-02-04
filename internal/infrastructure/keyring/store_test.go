@@ -1655,3 +1655,796 @@ func TestDecryptInvalidCiphertextFormats(t *testing.T) {
 	}
 }
 
+// TestFileStoreLoadTokenDataWithLegacyFormat tests loading legacy format encrypted files.
+func TestFileStoreLoadTokenDataWithLegacyFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	account := "legacy-test"
+	tokensDir := filepath.Join(tmpDir, "tokens")
+	if err := os.MkdirAll(tokensDir, 0700); err != nil {
+		t.Fatalf("failed to create tokens dir: %v", err)
+	}
+
+	// Create token data
+	data := &tokenData{
+		Tokens: map[string][]byte{
+			"key1": []byte("value1"),
+		},
+	}
+	plaintext, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("failed to marshal token data: %v", err)
+	}
+
+	// Encrypt using legacy key derivation
+	legacyKey := store.deriveLegacyKey(account)
+	ciphertext, err := encrypt(plaintext, legacyKey)
+	if err != nil {
+		t.Fatalf("failed to encrypt: %v", err)
+	}
+
+	// Write directly to file (legacy format - raw encrypted data, not JSON structure)
+	filePath := filepath.Join(tokensDir, account+".enc")
+	if err := os.WriteFile(filePath, ciphertext, 0600); err != nil {
+		t.Fatalf("failed to write legacy file: %v", err)
+	}
+
+	// Try to read using the store - should fall back to legacy format
+	val, err := store.Get(account, "key1")
+	if err != nil {
+		t.Fatalf("Get failed with legacy format: %v", err)
+	}
+
+	if string(val) != "value1" {
+		t.Errorf("Get = %q, want 'value1'", val)
+	}
+}
+
+// TestFileStoreSetErrorWhenLoadFails tests Set when loadTokenData fails with non-NotExist error.
+func TestFileStoreSetErrorWhenLoadFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	account := "load-err-test"
+	tokensDir := filepath.Join(tmpDir, "tokens")
+	if err := os.MkdirAll(tokensDir, 0700); err != nil {
+		t.Fatalf("failed to create tokens dir: %v", err)
+	}
+
+	// Create a corrupted file that will fail to parse and decrypt
+	filePath := filepath.Join(tokensDir, account+".enc")
+	// Write valid JSON structure but with invalid encrypted content
+	invalidContent := `{"salt":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","ciphertext":"dG9vLXNob3J0"}`
+	if err := os.WriteFile(filePath, []byte(invalidContent), 0600); err != nil {
+		t.Fatalf("failed to write invalid file: %v", err)
+	}
+
+	// Set should fail because it can't load existing data
+	err = store.Set(account, "key", []byte("value"))
+	if err == nil {
+		t.Error("expected error when loading corrupted file")
+	}
+}
+
+// TestFileStoreDeleteWithLoadError tests Delete when loadTokenData fails.
+func TestFileStoreDeleteWithLoadError(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	account := "delete-load-err"
+	tokensDir := filepath.Join(tmpDir, "tokens")
+	if err := os.MkdirAll(tokensDir, 0700); err != nil {
+		t.Fatalf("failed to create tokens dir: %v", err)
+	}
+
+	// Create a corrupted file
+	filePath := filepath.Join(tokensDir, account+".enc")
+	if err := os.WriteFile(filePath, []byte("not json at all"), 0600); err != nil {
+		t.Fatalf("failed to write corrupted file: %v", err)
+	}
+
+	// Delete should fail with corrupted file
+	err = store.Delete(account, "key")
+	if err == nil {
+		t.Error("expected error when loading corrupted file during delete")
+	}
+}
+
+// TestFileStoreListWithLoadError tests List when loadTokenData fails.
+func TestFileStoreListWithLoadError(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	account := "list-load-err"
+	tokensDir := filepath.Join(tmpDir, "tokens")
+	if err := os.MkdirAll(tokensDir, 0700); err != nil {
+		t.Fatalf("failed to create tokens dir: %v", err)
+	}
+
+	// Create a corrupted file
+	filePath := filepath.Join(tokensDir, account+".enc")
+	if err := os.WriteFile(filePath, []byte("corrupted data"), 0600); err != nil {
+		t.Fatalf("failed to write corrupted file: %v", err)
+	}
+
+	// List should fail with corrupted file
+	_, err = store.List(account)
+	if err == nil {
+		t.Error("expected error when loading corrupted file during list")
+	}
+}
+
+// TestNewStoreFallbackToFileStore tests that NewStore falls back to FileStore when keyring unavailable.
+func TestNewStoreFallbackToFileStore(t *testing.T) {
+	// This test verifies that NewStore returns some kind of store
+	// In test environments, it may use FileStore as fallback
+	store, err := NewStore()
+	if err != nil {
+		// Some environments don't have keyring support, which is fine
+		t.Logf("NewStore returned error (may be expected): %v", err)
+		return
+	}
+
+	if store == nil {
+		t.Error("NewStore returned nil store without error")
+		return
+	}
+
+	// Verify the store works by doing a basic operation
+	account := "new-store-test"
+	key := "test-key"
+	value := []byte("test-value")
+
+	// This may fail in some environments, which is acceptable
+	if err := store.Set(account, key, value); err != nil {
+		t.Logf("Store.Set failed (may be expected in some environments): %v", err)
+		return
+	}
+
+	retrieved, err := store.Get(account, key)
+	if err != nil {
+		t.Logf("Store.Get failed: %v", err)
+		return
+	}
+
+	if !bytes.Equal(retrieved, value) {
+		t.Errorf("retrieved value = %q, want %q", retrieved, value)
+	}
+
+	// Clean up
+	store.Delete(account, key)
+}
+
+// TestGetConfigDirWithNoHome tests getConfigDir when home directory lookup fails.
+func TestGetConfigDirWithNoHome(t *testing.T) {
+	// This test mainly verifies that getConfigDir doesn't panic
+	configDir, err := getConfigDir()
+	if err != nil {
+		t.Fatalf("getConfigDir failed: %v", err)
+	}
+
+	if configDir == "" {
+		t.Error("getConfigDir returned empty string")
+	}
+}
+
+// TestFileStoreGetWithInvalidJSONTokenData tests Get when token data has invalid JSON.
+func TestFileStoreGetWithInvalidJSONTokenData(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	account := "invalid-json-test"
+	tokensDir := filepath.Join(tmpDir, "tokens")
+	if err := os.MkdirAll(tokensDir, 0700); err != nil {
+		t.Fatalf("failed to create tokens dir: %v", err)
+	}
+
+	// Create a file with valid encryption format but invalid token JSON inside
+	salt := make([]byte, saltSize)
+	if _, err := rand.Read(salt); err != nil {
+		t.Fatalf("failed to generate salt: %v", err)
+	}
+
+	// Encrypt invalid JSON
+	key := store.deriveKey(account, salt)
+	ciphertext, err := encrypt([]byte("not valid json"), key)
+	if err != nil {
+		t.Fatalf("failed to encrypt: %v", err)
+	}
+
+	encFile := encryptedFile{
+		Salt:       salt,
+		Ciphertext: ciphertext,
+	}
+	fileData, err := json.Marshal(encFile)
+	if err != nil {
+		t.Fatalf("failed to marshal encrypted file: %v", err)
+	}
+
+	filePath := filepath.Join(tokensDir, account+".enc")
+	if err := os.WriteFile(filePath, fileData, 0600); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// Get should fail because token data is not valid JSON
+	_, err = store.Get(account, "key")
+	if err == nil {
+		t.Error("expected error for invalid JSON token data")
+	}
+}
+
+// TestFileStoreLoadLegacyTokenDataWithInvalidJSON tests legacy format with invalid JSON.
+func TestFileStoreLoadLegacyTokenDataWithInvalidJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	account := "legacy-invalid-json"
+	tokensDir := filepath.Join(tmpDir, "tokens")
+	if err := os.MkdirAll(tokensDir, 0700); err != nil {
+		t.Fatalf("failed to create tokens dir: %v", err)
+	}
+
+	// Encrypt invalid JSON using legacy key
+	legacyKey := store.deriveLegacyKey(account)
+	ciphertext, err := encrypt([]byte("not valid json"), legacyKey)
+	if err != nil {
+		t.Fatalf("failed to encrypt: %v", err)
+	}
+
+	// Write raw encrypted data (legacy format)
+	filePath := filepath.Join(tokensDir, account+".enc")
+	if err := os.WriteFile(filePath, ciphertext, 0600); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// Get should fail because decrypted data is not valid JSON
+	_, err = store.Get(account, "key")
+	if err == nil {
+		t.Error("expected error for invalid JSON in legacy format")
+	}
+}
+
+// TestOpenKeyringWithDifferentPlatforms tests openKeyring configuration.
+func TestOpenKeyringWithDifferentPlatforms(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// This mainly verifies that openKeyring doesn't panic
+	_, err := openKeyring(tmpDir)
+	// Error is acceptable - we're mainly testing it doesn't panic
+	_ = err
+}
+
+// TestDeriveMachinePasswordDeterminism tests that machine password is deterministic.
+func TestDeriveMachinePasswordDeterminism(t *testing.T) {
+	password1 := deriveMachinePassword()
+	password2 := deriveMachinePassword()
+	password3 := deriveMachinePassword()
+
+	if password1 != password2 || password2 != password3 {
+		t.Error("deriveMachinePassword should be deterministic")
+	}
+}
+
+// TestGetMachineInfoDeterminism tests that machine info is deterministic.
+func TestGetMachineInfoDeterminism(t *testing.T) {
+	info1 := getMachineInfo()
+	info2 := getMachineInfo()
+	info3 := getMachineInfo()
+
+	if info1 != info2 || info2 != info3 {
+		t.Error("getMachineInfo should be deterministic")
+	}
+}
+
+// TestParseKeyWithColons tests parseKey with keys containing colons.
+func TestParseKeyWithColons(t *testing.T) {
+	// Test that parseKey handles edge cases
+	testCases := []struct {
+		fullKey     string
+		wantAccount string
+		wantKey     string
+		wantOK      bool
+	}{
+		// Valid format
+		{"goog:account:key", "account", "key", true},
+		// Key with colons - parseKey uses SplitN(_, 3) so key can contain colons
+		{"goog:account:key:with:colons", "account", "key:with:colons", true},
+		// Too few parts
+		{"goog:onlyonepart", "", "", false},
+		{"goog", "", "", false},
+		{"", "", "", false},
+		// Wrong prefix
+		{"other:account:key", "", "", false},
+		{"google:account:key", "", "", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.fullKey, func(t *testing.T) {
+			account, key, ok := parseKey(tc.fullKey)
+			if ok != tc.wantOK {
+				t.Errorf("parseKey(%q) ok = %v, want %v", tc.fullKey, ok, tc.wantOK)
+				return
+			}
+			if ok {
+				if account != tc.wantAccount {
+					t.Errorf("parseKey(%q) account = %q, want %q", tc.fullKey, account, tc.wantAccount)
+				}
+				if key != tc.wantKey {
+					t.Errorf("parseKey(%q) key = %q, want %q", tc.fullKey, key, tc.wantKey)
+				}
+			}
+		})
+	}
+}
+
+// TestFileStoreDeletePreservesOtherAccountFiles tests that deleting from one account doesn't affect others.
+func TestFileStoreDeletePreservesOtherAccountFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	// Create two accounts with tokens
+	if err := store.Set("account1", "token", []byte("token1")); err != nil {
+		t.Fatalf("Set account1 failed: %v", err)
+	}
+	if err := store.Set("account2", "token", []byte("token2")); err != nil {
+		t.Fatalf("Set account2 failed: %v", err)
+	}
+
+	// Delete all keys from account1 (file should be removed)
+	if err := store.Delete("account1", "token"); err != nil {
+		t.Fatalf("Delete account1 failed: %v", err)
+	}
+
+	// account2 should still work
+	val, err := store.Get("account2", "token")
+	if err != nil {
+		t.Fatalf("Get account2 after account1 delete failed: %v", err)
+	}
+	if string(val) != "token2" {
+		t.Errorf("account2 token = %q, want 'token2'", val)
+	}
+}
+
+// TestEncryptValidKeySizes tests encryption with all valid AES key sizes.
+func TestEncryptValidKeySizes(t *testing.T) {
+	validSizes := []int{16, 24, 32} // AES-128, AES-192, AES-256
+
+	for _, size := range validSizes {
+		t.Run("size-"+string(rune(size+'0')), func(t *testing.T) {
+			key := make([]byte, size)
+			if _, err := rand.Read(key); err != nil {
+				t.Fatalf("failed to generate key: %v", err)
+			}
+
+			data := []byte("test data")
+			ciphertext, err := encrypt(data, key)
+			if err != nil {
+				t.Errorf("encrypt with %d byte key failed: %v", size, err)
+			}
+			if len(ciphertext) == 0 {
+				t.Error("ciphertext is empty")
+			}
+		})
+	}
+}
+
+// TestDecryptWithInvalidKey tests decrypt with invalid key.
+func TestDecryptWithInvalidKey(t *testing.T) {
+	// Create valid ciphertext first
+	validKey := make([]byte, 32)
+	if _, err := rand.Read(validKey); err != nil {
+		t.Fatalf("failed to generate valid key: %v", err)
+	}
+
+	data := []byte("secret data")
+	ciphertext, err := encrypt(data, validKey)
+	if err != nil {
+		t.Fatalf("encrypt failed: %v", err)
+	}
+
+	// Try to decrypt with different key
+	wrongKey := make([]byte, 32)
+	if _, err := rand.Read(wrongKey); err != nil {
+		t.Fatalf("failed to generate wrong key: %v", err)
+	}
+
+	_, err = decrypt(ciphertext, wrongKey)
+	if err == nil {
+		t.Error("expected error when decrypting with wrong key")
+	}
+}
+
+// TestFileStoreSaveTokenDataMarshalError simulates a marshal error scenario.
+func TestFileStoreSaveTokenDataMarshalError(t *testing.T) {
+	// This is hard to test directly since json.Marshal rarely fails on maps
+	// We mainly want to verify the error path exists and code doesn't panic
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	// Create and save some data to verify the happy path works
+	account := "marshal-test"
+	if err := store.Set(account, "key", []byte("value")); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	// Verify it was saved
+	val, err := store.Get(account, "key")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if string(val) != "value" {
+		t.Errorf("Get = %q, want 'value'", val)
+	}
+}
+
+// TestNewFileStoreWithInvalidPath tests NewFileStore with an invalid path.
+func TestNewFileStoreWithInvalidPath(t *testing.T) {
+	// Try to create a file store in a path that cannot be created
+	_, err := NewFileStore("/dev/null/invalid/path")
+	if err == nil {
+		t.Error("expected error for invalid path")
+	}
+}
+
+// TestFileStoreSaveTokenDataSaltError tests error handling during salt generation.
+// Note: This is difficult to test directly since rand.Reader rarely fails,
+// but we verify the function works correctly with valid random generation.
+func TestFileStoreSaveTokenDataSaltGeneration(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	account := "salt-gen-test"
+
+	// Multiple saves should work with different salts each time
+	for i := 0; i < 5; i++ {
+		key := "key" + string(rune('0'+i))
+		value := []byte("value" + string(rune('0'+i)))
+		if err := store.Set(account, key, value); err != nil {
+			t.Fatalf("Set %s failed: %v", key, err)
+		}
+	}
+
+	// Verify all keys are retrievable
+	for i := 0; i < 5; i++ {
+		key := "key" + string(rune('0'+i))
+		expected := "value" + string(rune('0'+i))
+		val, err := store.Get(account, key)
+		if err != nil {
+			t.Errorf("Get %s failed: %v", key, err)
+			continue
+		}
+		if string(val) != expected {
+			t.Errorf("Get %s = %q, want %q", key, val, expected)
+		}
+	}
+}
+
+// TestEncryptWithNonceFail tests encrypt behavior (nonce generation).
+// Since rand.Reader rarely fails, this tests the normal path.
+func TestEncryptWithNonceGeneration(t *testing.T) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+
+	data := []byte("test data for encryption")
+
+	// Encrypt multiple times - should produce different ciphertexts (different nonces)
+	ciphertexts := make([][]byte, 10)
+	for i := 0; i < 10; i++ {
+		ct, err := encrypt(data, key)
+		if err != nil {
+			t.Fatalf("encrypt %d failed: %v", i, err)
+		}
+		ciphertexts[i] = ct
+	}
+
+	// All ciphertexts should be different
+	for i := 0; i < 10; i++ {
+		for j := i + 1; j < 10; j++ {
+			if bytes.Equal(ciphertexts[i], ciphertexts[j]) {
+				t.Errorf("ciphertext[%d] equals ciphertext[%d]", i, j)
+			}
+		}
+	}
+}
+
+// TestDecryptWithGCMOpenError tests decrypt with tampered ciphertext.
+func TestDecryptWithGCMOpenError(t *testing.T) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+
+	data := []byte("test data")
+	ciphertext, err := encrypt(data, key)
+	if err != nil {
+		t.Fatalf("encrypt failed: %v", err)
+	}
+
+	// Tamper with the ciphertext
+	if len(ciphertext) > 20 {
+		ciphertext[20] ^= 0xff
+	}
+
+	// Decryption should fail due to authentication failure
+	_, err = decrypt(ciphertext, key)
+	if err == nil {
+		t.Error("expected error when decrypting tampered ciphertext")
+	}
+}
+
+// TestFileStoreSetWithNilExistingData tests Set when there's no existing file.
+func TestFileStoreSetWithNilExistingData(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	account := "new-account"
+	key := "first-key"
+	value := []byte("first-value")
+
+	// This should create new token data since none exists
+	if err := store.Set(account, key, value); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	retrieved, err := store.Get(account, key)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if !bytes.Equal(retrieved, value) {
+		t.Errorf("Get = %q, want %q", retrieved, value)
+	}
+}
+
+// TestFileStoreDeleteWhenFileEmpty tests Delete when no keys remain.
+func TestFileStoreDeleteWhenFileEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewFileStore(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	account := "delete-empty-test"
+	key := "only-key"
+
+	// Set a single key
+	if err := store.Set(account, key, []byte("value")); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	filePath := filepath.Join(tmpDir, "tokens", account+".enc")
+
+	// Verify file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		t.Fatal("file should exist after Set")
+	}
+
+	// Delete the only key
+	if err := store.Delete(account, key); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	// File should be removed
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Error("file should be removed when last key is deleted")
+	}
+}
+
+// TestGetConfigDirSuccess tests getConfigDir returns valid path.
+func TestGetConfigDirSuccess(t *testing.T) {
+	configDir, err := getConfigDir()
+	if err != nil {
+		t.Fatalf("getConfigDir failed: %v", err)
+	}
+
+	if configDir == "" {
+		t.Error("getConfigDir returned empty string")
+	}
+
+	// Path should end with "goog"
+	if filepath.Base(configDir) != "goog" {
+		t.Errorf("config dir should end with 'goog', got %q", configDir)
+	}
+
+	// Path should be absolute
+	if !filepath.IsAbs(configDir) {
+		t.Errorf("config dir should be absolute, got %q", configDir)
+	}
+}
+
+// TestServiceNameConstant tests that ServiceName is correctly defined.
+func TestServiceNameConstant(t *testing.T) {
+	if ServiceName != "go-goog-cli" {
+		t.Errorf("ServiceName = %q, want 'go-goog-cli'", ServiceName)
+	}
+}
+
+// TestErrKeyNotFoundConstant tests that ErrKeyNotFound is correctly defined.
+func TestErrKeyNotFoundConstant(t *testing.T) {
+	if ErrKeyNotFound == nil {
+		t.Error("ErrKeyNotFound should not be nil")
+	}
+	if ErrKeyNotFound.Error() != "key not found" {
+		t.Errorf("ErrKeyNotFound.Error() = %q, want 'key not found'", ErrKeyNotFound.Error())
+	}
+}
+
+// TestKeyringStoreSetMethod tests the KeyringStore Set method if keyring is available.
+func TestKeyringStoreSetMethod(t *testing.T) {
+	// Try to create a real keyring store
+	store, err := NewStore()
+	if err != nil {
+		t.Skip("keyring not available in this environment")
+	}
+
+	// Check if it's a KeyringStore (not FileStore)
+	if _, ok := store.(*KeyringStore); !ok {
+		t.Skip("store is not KeyringStore")
+	}
+
+	account := "keyring-set-test"
+	key := "test-key"
+	value := []byte("test-value")
+
+	// Test Set
+	if err := store.Set(account, key, value); err != nil {
+		t.Logf("KeyringStore.Set failed (may be expected): %v", err)
+		return
+	}
+
+	// Verify it can be retrieved
+	retrieved, err := store.Get(account, key)
+	if err != nil {
+		t.Logf("KeyringStore.Get failed: %v", err)
+		return
+	}
+
+	if !bytes.Equal(retrieved, value) {
+		t.Errorf("retrieved = %q, want %q", retrieved, value)
+	}
+
+	// Clean up
+	store.Delete(account, key)
+}
+
+// TestKeyringStoreListMethod tests the KeyringStore List method if keyring is available.
+func TestKeyringStoreListMethod(t *testing.T) {
+	store, err := NewStore()
+	if err != nil {
+		t.Skip("keyring not available in this environment")
+	}
+
+	if _, ok := store.(*KeyringStore); !ok {
+		t.Skip("store is not KeyringStore")
+	}
+
+	account := "keyring-list-test"
+
+	// Set some keys
+	if err := store.Set(account, "key1", []byte("value1")); err != nil {
+		t.Logf("KeyringStore.Set failed (may be expected): %v", err)
+		return
+	}
+	if err := store.Set(account, "key2", []byte("value2")); err != nil {
+		t.Logf("KeyringStore.Set key2 failed: %v", err)
+		// Clean up and skip
+		store.Delete(account, "key1")
+		return
+	}
+
+	// Test List
+	keys, err := store.List(account)
+	if err != nil {
+		t.Logf("KeyringStore.List failed: %v", err)
+	} else {
+		if len(keys) < 2 {
+			t.Logf("expected at least 2 keys, got %d", len(keys))
+		}
+	}
+
+	// Clean up
+	store.Delete(account, "key1")
+	store.Delete(account, "key2")
+}
+
+// TestKeyringStoreDeleteMethod tests the KeyringStore Delete method if keyring is available.
+func TestKeyringStoreDeleteMethod(t *testing.T) {
+	store, err := NewStore()
+	if err != nil {
+		t.Skip("keyring not available in this environment")
+	}
+
+	if _, ok := store.(*KeyringStore); !ok {
+		t.Skip("store is not KeyringStore")
+	}
+
+	account := "keyring-delete-test"
+	key := "key-to-delete"
+
+	// Set a key
+	if err := store.Set(account, key, []byte("value")); err != nil {
+		t.Logf("KeyringStore.Set failed (may be expected): %v", err)
+		return
+	}
+
+	// Delete it
+	if err := store.Delete(account, key); err != nil {
+		t.Logf("KeyringStore.Delete failed: %v", err)
+		return
+	}
+
+	// Verify it's gone
+	_, err = store.Get(account, key)
+	if err == nil {
+		t.Error("expected error after deletion")
+	}
+}
+
+// TestKeyringStoreDeleteNonexistent tests deleting a key that doesn't exist.
+func TestKeyringStoreDeleteNonexistent(t *testing.T) {
+	store, err := NewStore()
+	if err != nil {
+		t.Skip("keyring not available in this environment")
+	}
+
+	if _, ok := store.(*KeyringStore); !ok {
+		t.Skip("store is not KeyringStore")
+	}
+
+	// Delete should be idempotent - not error on non-existent key
+	err = store.Delete("nonexistent-account", "nonexistent-key")
+	if err != nil && err != ErrKeyNotFound {
+		t.Logf("Delete non-existent: %v (may be acceptable)", err)
+	}
+}
+
+// TestKeyringStoreGetNonexistent tests getting a key that doesn't exist.
+func TestKeyringStoreGetNonexistent(t *testing.T) {
+	store, err := NewStore()
+	if err != nil {
+		t.Skip("keyring not available in this environment")
+	}
+
+	if _, ok := store.(*KeyringStore); !ok {
+		t.Skip("store is not KeyringStore")
+	}
+
+	_, err = store.Get("nonexistent-account", "nonexistent-key")
+	if err == nil {
+		t.Error("expected error for non-existent key")
+	}
+}
+

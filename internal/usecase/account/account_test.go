@@ -385,3 +385,130 @@ func TestAccountService_ResolveAccount(t *testing.T) {
 		}
 	})
 }
+
+func TestAccountService_Add_AuthFlowError(t *testing.T) {
+	store := newMockStore()
+	cfg := createTestConfig(t)
+	authFlow := &mockAuthFlow{
+		err: errors.New("authentication failed"),
+	}
+
+	svc := NewService(cfg, store, authFlow)
+
+	_, err := svc.Add(context.Background(), "work", []string{"openid"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "authentication failed: authentication failed" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestAccountService_Add_DefaultScopes(t *testing.T) {
+	store := newMockStore()
+	cfg := createTestConfig(t)
+	authFlow := &mockAuthFlow{
+		email: "test@example.com",
+		token: &oauth2.Token{
+			AccessToken:  "test-access-token",
+			RefreshToken: "test-refresh-token",
+			Expiry:       time.Now().Add(time.Hour),
+		},
+	}
+
+	svc := NewService(cfg, store, authFlow)
+
+	// Add with empty scopes - should use defaults
+	acc, err := svc.Add(context.Background(), "work", []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(acc.Scopes) == 0 {
+		t.Error("expected default scopes to be set")
+	}
+}
+
+func TestAccountService_Remove_DefaultAccountReassignment(t *testing.T) {
+	store := newMockStore()
+	cfg := createTestConfig(t)
+	authFlow := &mockAuthFlow{
+		email: "test@example.com",
+		token: &oauth2.Token{AccessToken: "test"},
+	}
+
+	svc := NewService(cfg, store, authFlow)
+
+	// Add two accounts
+	authFlow.email = "work@example.com"
+	_, _ = svc.Add(context.Background(), "work", []string{})
+	authFlow.email = "personal@example.com"
+	_, _ = svc.Add(context.Background(), "personal", []string{})
+
+	// Set work as default
+	cfg.DefaultAccount = "work"
+
+	// Remove work account
+	err := svc.Remove("work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Default should be reassigned
+	if cfg.DefaultAccount == "work" {
+		t.Error("expected default account to be reassigned")
+	}
+}
+
+func TestAccountService_Rename_DefaultAccountUpdate(t *testing.T) {
+	store := newMockStore()
+	cfg := createTestConfig(t)
+	authFlow := &mockAuthFlow{
+		email: "work@example.com",
+		token: &oauth2.Token{AccessToken: "test"},
+	}
+
+	svc := NewService(cfg, store, authFlow)
+
+	// Add account
+	_, _ = svc.Add(context.Background(), "work", []string{})
+
+	// Set as default
+	cfg.DefaultAccount = "work"
+
+	// Rename
+	err := svc.Rename("work", "office")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Default should be updated
+	if cfg.DefaultAccount != "office" {
+		t.Errorf("expected default account 'office', got '%s'", cfg.DefaultAccount)
+	}
+}
+
+func TestAccountService_GetTokenManager(t *testing.T) {
+	store := newMockStore()
+	cfg := createTestConfig(t)
+	authFlow := &mockAuthFlow{}
+
+	svc := NewService(cfg, store, authFlow)
+
+	tm := svc.GetTokenManager()
+	if tm == nil {
+		t.Error("expected non-nil token manager")
+	}
+}
+
+func TestAccountService_GetConfig(t *testing.T) {
+	store := newMockStore()
+	cfg := createTestConfig(t)
+	authFlow := &mockAuthFlow{}
+
+	svc := NewService(cfg, store, authFlow)
+
+	c := svc.GetConfig()
+	if c != cfg {
+		t.Error("expected config to match")
+	}
+}

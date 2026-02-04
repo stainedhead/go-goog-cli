@@ -22,6 +22,21 @@ go build -o bin/goog ./cmd/goog
 go install ./cmd/goog
 ```
 
+## Setup
+
+Before using `goog`, you need to configure Google OAuth2 credentials:
+
+1. Create a Google Cloud project and enable Gmail/Calendar APIs
+2. Configure OAuth consent screen
+3. Create OAuth credentials (Desktop app)
+4. Set environment variables:
+   ```bash
+   export GOOG_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+   export GOOG_CLIENT_SECRET="your-client-secret"
+   ```
+
+**See [documentation/SETUP.md](documentation/SETUP.md) for detailed step-by-step instructions with screenshots.**
+
 ## Quick Start
 
 ```bash
@@ -250,6 +265,7 @@ See [AGENTS.md](AGENTS.md) for development guidelines.
 
 ## Documentation
 
+- [Setup Guide](documentation/SETUP.md) - OAuth2 configuration and first-time setup
 - [Product Summary](documentation/product-summary.md) - Overview and goals
 - [Product Details](documentation/product-details.md) - Features and workflows
 - [Technical Details](documentation/technical-details.md) - Architecture and APIs

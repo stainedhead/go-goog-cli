@@ -317,8 +317,8 @@ func getGmailRepository(ctx context.Context) (*repository.GmailRepository, strin
 func runMailList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get Gmail repository
-	repo, _, err := getGmailRepository(ctx)
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -355,8 +355,8 @@ func runMailRead(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	messageID := args[0]
 
-	// Get Gmail repository
-	repo, _, err := getGmailRepository(ctx)
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -388,8 +388,8 @@ func runMailSearch(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	query := args[0]
 
-	// Get Gmail repository
-	repo, _, err := getGmailRepository(ctx)
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -429,7 +429,8 @@ func runMailTrash(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	messageID := args[0]
 
-	repo, _, err := getGmailRepository(ctx)
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -449,7 +450,8 @@ func runMailUntrash(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	messageID := args[0]
 
-	repo, _, err := getGmailRepository(ctx)
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -469,7 +471,8 @@ func runMailArchive(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	messageID := args[0]
 
-	repo, _, err := getGmailRepository(ctx)
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -489,7 +492,8 @@ func runMailDelete(cmd *cobra.Command, args []string) error {
 	messageID := args[0]
 	ctx := context.Background()
 
-	repo, _, err := getGmailRepository(ctx)
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -509,7 +513,8 @@ func runMailModify(cmd *cobra.Command, args []string) error {
 	messageID := args[0]
 	ctx := context.Background()
 
-	repo, _, err := getGmailRepository(ctx)
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
@@ -538,7 +543,8 @@ func runMailMark(cmd *cobra.Command, args []string) error {
 	messageID := args[0]
 	ctx := context.Background()
 
-	repo, _, err := getGmailRepository(ctx)
+	// Get message repository using dependency injection
+	repo, _, err := getMessageRepositoryFromDeps(ctx)
 	if err != nil {
 		return err
 	}
