@@ -9,6 +9,7 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/adapter/repository"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/auth"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/config"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/keyring"
@@ -106,6 +107,28 @@ type FreeBusyRepository interface {
 	Query(ctx context.Context, request *calendar.FreeBusyRequest) (*calendar.FreeBusyResponse, error)
 }
 
+// TaskListRepository defines operations for managing task lists.
+// This interface mirrors domaintasks.TaskListRepository for dependency injection.
+type TaskListRepository interface {
+	List(ctx context.Context) ([]*domaintasks.TaskList, error)
+	Get(ctx context.Context, taskListID string) (*domaintasks.TaskList, error)
+	Create(ctx context.Context, taskList *domaintasks.TaskList) (*domaintasks.TaskList, error)
+	Update(ctx context.Context, taskList *domaintasks.TaskList) (*domaintasks.TaskList, error)
+	Delete(ctx context.Context, taskListID string) error
+}
+
+// TaskRepository defines operations for managing tasks.
+// This interface mirrors domaintasks.TaskRepository for dependency injection.
+type TaskRepository interface {
+	List(ctx context.Context, taskListID string, opts domaintasks.ListOptions) (*domaintasks.ListResult[*domaintasks.Task], error)
+	Get(ctx context.Context, taskListID, taskID string) (*domaintasks.Task, error)
+	Create(ctx context.Context, taskListID string, task *domaintasks.Task) (*domaintasks.Task, error)
+	Update(ctx context.Context, taskListID string, task *domaintasks.Task) (*domaintasks.Task, error)
+	Delete(ctx context.Context, taskListID, taskID string) error
+	Move(ctx context.Context, taskListID, taskID, parent, previous string) (*domaintasks.Task, error)
+	Clear(ctx context.Context, taskListID string) error
+}
+
 // AccountService defines operations for managing user accounts.
 type AccountService interface {
 	List() ([]*accountuc.Account, error)
@@ -138,6 +161,10 @@ type RepositoryFactory interface {
 	NewCalendarRepository(ctx context.Context, tokenSource oauth2.TokenSource) (CalendarRepository, error)
 	NewACLRepository(ctx context.Context, tokenSource oauth2.TokenSource) (ACLRepository, error)
 	NewFreeBusyRepository(ctx context.Context, tokenSource oauth2.TokenSource) (FreeBusyRepository, error)
+
+	// Tasks repositories
+	NewTaskListRepository(ctx context.Context, tokenSource oauth2.TokenSource) (TaskListRepository, error)
+	NewTaskRepository(ctx context.Context, tokenSource oauth2.TokenSource) (TaskRepository, error)
 }
 
 // Dependencies holds all external dependencies required by CLI commands.
@@ -368,4 +395,22 @@ func (f *defaultRepositoryFactory) NewFreeBusyRepository(ctx context.Context, to
 		return nil, err
 	}
 	return gcalSvc.FreeBusy(), nil
+}
+
+// NewTaskListRepository creates a new task list repository.
+func (f *defaultRepositoryFactory) NewTaskListRepository(ctx context.Context, tokenSource oauth2.TokenSource) (TaskListRepository, error) {
+	gtasksRepo, err := repository.NewGTasksRepository(ctx, tokenSource)
+	if err != nil {
+		return nil, err
+	}
+	return repository.NewGTaskListRepository(gtasksRepo), nil
+}
+
+// NewTaskRepository creates a new task repository.
+func (f *defaultRepositoryFactory) NewTaskRepository(ctx context.Context, tokenSource oauth2.TokenSource) (TaskRepository, error) {
+	gtasksRepo, err := repository.NewGTasksRepository(ctx, tokenSource)
+	if err != nil {
+		return nil, err
+	}
+	return repository.NewGTaskRepository(gtasksRepo), nil
 }

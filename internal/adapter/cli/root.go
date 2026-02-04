@@ -24,18 +24,20 @@ var (
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "goog",
-	Short: "CLI for Google Mail and Calendar",
-	Long: `goog is a command-line interface for managing Google Mail and Calendar services.
+	Short: "CLI for Google Mail, Calendar, and Tasks",
+	Long: `goog is a command-line interface for managing Google Mail, Calendar, and Tasks services.
 
 Designed for both human operators and AI agents, it provides programmatic
-access to Gmail and Google Calendar through a clean, scriptable interface.
+access to Gmail, Google Calendar, and Google Tasks through a clean, scriptable interface.
 
 Examples:
   goog auth login                    # Authenticate with Google
   goog mail list                     # List inbox messages
   goog mail search "is:unread"       # Search for unread messages
   goog cal today                     # Show today's events
-  goog cal create --title "Meeting"  # Create a calendar event`,
+  goog cal create --title "Meeting"  # Create a calendar event
+  goog tasks list                    # List tasks
+  goog tasks create "Buy groceries"  # Create a task`,
 }
 
 // versionCmd prints the version information.

@@ -36,6 +36,10 @@ const (
 	ScopeCalendarEvents   = "https://www.googleapis.com/auth/calendar.events"
 	ScopeCalendar         = "https://www.googleapis.com/auth/calendar"
 
+	// Tasks scopes
+	ScopeTasksReadonly = "https://www.googleapis.com/auth/tasks.readonly"
+	ScopeTasks         = "https://www.googleapis.com/auth/tasks"
+
 	// Drive scopes
 	ScopeDriveReadonly = "https://www.googleapis.com/auth/drive.readonly"
 	ScopeDriveFile     = "https://www.googleapis.com/auth/drive.file"

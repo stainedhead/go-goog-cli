@@ -7,6 +7,7 @@ import (
 
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/auth"
 	accountuc "github.com/stainedhead/go-goog-cli/internal/usecase/account"
 	"golang.org/x/oauth2"
@@ -697,6 +698,136 @@ func (m *MockFreeBusyRepository) Query(ctx context.Context, request *calendar.Fr
 	return &calendar.FreeBusyResponse{Calendars: make(map[string][]*calendar.TimePeriod)}, nil
 }
 
+// MockTaskListRepository implements TaskListRepository for testing.
+type MockTaskListRepository struct {
+	Lists     []*domaintasks.TaskList
+	TaskList  *domaintasks.TaskList
+	ListErr   error
+	GetErr    error
+	CreateErr error
+	UpdateErr error
+	DeleteErr error
+	ListFunc  func(ctx context.Context) ([]*domaintasks.TaskList, error)
+	GetFunc   func(ctx context.Context, taskListID string) (*domaintasks.TaskList, error)
+}
+
+func (m *MockTaskListRepository) List(ctx context.Context) ([]*domaintasks.TaskList, error) {
+	if m.ListFunc != nil {
+		return m.ListFunc(ctx)
+	}
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	if m.Lists != nil {
+		return m.Lists, nil
+	}
+	return []*domaintasks.TaskList{}, nil
+}
+
+func (m *MockTaskListRepository) Get(ctx context.Context, taskListID string) (*domaintasks.TaskList, error) {
+	if m.GetFunc != nil {
+		return m.GetFunc(ctx, taskListID)
+	}
+	if m.GetErr != nil {
+		return nil, m.GetErr
+	}
+	if m.TaskList != nil {
+		return m.TaskList, nil
+	}
+	return &domaintasks.TaskList{ID: taskListID, Title: "Test List"}, nil
+}
+
+func (m *MockTaskListRepository) Create(ctx context.Context, taskList *domaintasks.TaskList) (*domaintasks.TaskList, error) {
+	if m.CreateErr != nil {
+		return nil, m.CreateErr
+	}
+	return taskList, nil
+}
+
+func (m *MockTaskListRepository) Update(ctx context.Context, taskList *domaintasks.TaskList) (*domaintasks.TaskList, error) {
+	if m.UpdateErr != nil {
+		return nil, m.UpdateErr
+	}
+	return taskList, nil
+}
+
+func (m *MockTaskListRepository) Delete(ctx context.Context, taskListID string) error {
+	return m.DeleteErr
+}
+
+// MockTaskRepository implements TaskRepository for testing.
+type MockTaskRepository struct {
+	Tasks     *domaintasks.ListResult[*domaintasks.Task]
+	Task      *domaintasks.Task
+	ListErr   error
+	GetErr    error
+	CreateErr error
+	UpdateErr error
+	DeleteErr error
+	MoveErr   error
+	ClearErr  error
+	ListFunc  func(ctx context.Context, taskListID string, opts domaintasks.ListOptions) (*domaintasks.ListResult[*domaintasks.Task], error)
+	GetFunc   func(ctx context.Context, taskListID, taskID string) (*domaintasks.Task, error)
+}
+
+func (m *MockTaskRepository) List(ctx context.Context, taskListID string, opts domaintasks.ListOptions) (*domaintasks.ListResult[*domaintasks.Task], error) {
+	if m.ListFunc != nil {
+		return m.ListFunc(ctx, taskListID, opts)
+	}
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	if m.Tasks != nil {
+		return m.Tasks, nil
+	}
+	return &domaintasks.ListResult[*domaintasks.Task]{Items: []*domaintasks.Task{}}, nil
+}
+
+func (m *MockTaskRepository) Get(ctx context.Context, taskListID, taskID string) (*domaintasks.Task, error) {
+	if m.GetFunc != nil {
+		return m.GetFunc(ctx, taskListID, taskID)
+	}
+	if m.GetErr != nil {
+		return nil, m.GetErr
+	}
+	if m.Task != nil {
+		return m.Task, nil
+	}
+	return &domaintasks.Task{ID: taskID, TaskListID: taskListID, Title: "Test Task"}, nil
+}
+
+func (m *MockTaskRepository) Create(ctx context.Context, taskListID string, task *domaintasks.Task) (*domaintasks.Task, error) {
+	if m.CreateErr != nil {
+		return nil, m.CreateErr
+	}
+	return task, nil
+}
+
+func (m *MockTaskRepository) Update(ctx context.Context, taskListID string, task *domaintasks.Task) (*domaintasks.Task, error) {
+	if m.UpdateErr != nil {
+		return nil, m.UpdateErr
+	}
+	return task, nil
+}
+
+func (m *MockTaskRepository) Delete(ctx context.Context, taskListID, taskID string) error {
+	return m.DeleteErr
+}
+
+func (m *MockTaskRepository) Move(ctx context.Context, taskListID, taskID, parent, previous string) (*domaintasks.Task, error) {
+	if m.MoveErr != nil {
+		return nil, m.MoveErr
+	}
+	if m.Task != nil {
+		return m.Task, nil
+	}
+	return &domaintasks.Task{ID: taskID, TaskListID: taskListID, Title: "Test Task"}, nil
+}
+
+func (m *MockTaskRepository) Clear(ctx context.Context, taskListID string) error {
+	return m.ClearErr
+}
+
 // MockRepositoryFactory implements RepositoryFactory for testing.
 type MockRepositoryFactory struct {
 	MessageRepo  MessageRepository
@@ -707,6 +838,8 @@ type MockRepositoryFactory struct {
 	CalendarRepo CalendarRepository
 	ACLRepo      ACLRepository
 	FreeBusyRepo FreeBusyRepository
+	TaskListRepo TaskListRepository
+	TaskRepo     TaskRepository
 	MessageErr   error
 	DraftErr     error
 	ThreadErr    error
@@ -715,6 +848,8 @@ type MockRepositoryFactory struct {
 	CalendarErr  error
 	ACLErr       error
 	FreeBusyErr  error
+	TaskListErr  error
+	TaskErr      error
 }
 
 func (f *MockRepositoryFactory) NewMessageRepository(ctx context.Context, tokenSource oauth2.TokenSource) (MessageRepository, error) {
@@ -795,6 +930,26 @@ func (f *MockRepositoryFactory) NewFreeBusyRepository(ctx context.Context, token
 		return &MockFreeBusyRepository{}, nil
 	}
 	return f.FreeBusyRepo, nil
+}
+
+func (f *MockRepositoryFactory) NewTaskListRepository(ctx context.Context, tokenSource oauth2.TokenSource) (TaskListRepository, error) {
+	if f.TaskListErr != nil {
+		return nil, f.TaskListErr
+	}
+	if f.TaskListRepo == nil {
+		return &MockTaskListRepository{}, nil
+	}
+	return f.TaskListRepo, nil
+}
+
+func (f *MockRepositoryFactory) NewTaskRepository(ctx context.Context, tokenSource oauth2.TokenSource) (TaskRepository, error) {
+	if f.TaskErr != nil {
+		return nil, f.TaskErr
+	}
+	if f.TaskRepo == nil {
+		return &MockTaskRepository{}, nil
+	}
+	return f.TaskRepo, nil
 }
 
 // NewTestDependencies creates a Dependencies instance with all mock implementations.

@@ -1,14 +1,15 @@
 # goog
 
-A command-line interface for Google Mail and Calendar, built with Go.
+A command-line interface for Google Mail, Calendar, and Tasks, built with Go.
 
-Designed for both human operators and AI agents, `goog` provides programmatic access to Gmail and Google Calendar through a clean, scriptable interface.
+Designed for both human operators and AI agents, `goog` provides programmatic access to Gmail, Google Calendar, and Google Tasks through a clean, scriptable interface.
 
 ## Features
 
 - **Multi-account support** - Manage multiple Google accounts with easy switching
 - **Gmail integration** - List, read, send, reply, forward, and manage messages
 - **Calendar integration** - Events, calendars, sharing, and availability queries
+- **Tasks integration** - Manage task lists and tasks with full CRUD operations
 - **Flexible output** - JSON, table, and plain text formats
 - **Secure credentials** - OAuth2 tokens stored in system keyring
 
@@ -48,6 +49,12 @@ goog mail list
 
 # Show today's calendar
 goog cal today
+
+# List tasks
+goog tasks list
+
+# Create a task
+goog tasks create "Buy groceries" --due "2024-12-31"
 
 # Create an event
 goog cal create --title "Meeting" --start "tomorrow 2pm" --end "tomorrow 3pm"
@@ -224,6 +231,42 @@ goog cal freebusy --start "2024-01-15T09:00:00Z" --end "2024-01-15T17:00:00Z"
 goog cal rsvp abc123 --accept
 ```
 
+### Tasks
+
+```bash
+# List all task lists
+goog tasks lists
+
+# Create a new task list
+goog tasks create-list "Work Projects"
+
+# List tasks in a task list
+goog tasks list --list "@default"
+goog tasks list --show-completed
+
+# Create a task
+goog tasks create "Submit quarterly report" --due "2024-12-31"
+goog tasks create "Review slides" --parent task-parent-id  # Create subtask
+
+# Get task details
+goog tasks get task-id --list "@default"
+
+# Update a task
+goog tasks update task-id --title "Updated title" --notes "New notes"
+
+# Complete a task
+goog tasks complete task-id
+
+# Reopen a completed task
+goog tasks reopen task-id
+
+# Delete a task
+goog tasks delete task-id --confirm
+
+# Clear all completed tasks from a list
+goog tasks clear --confirm
+```
+
 ### JSON Output for Scripting
 
 ```bash
@@ -239,7 +282,7 @@ goog cal today --format json
 ```
 cmd/goog/          # Application entry point
 internal/
-  domain/          # Business entities (mail, calendar, account)
+  domain/          # Business entities (mail, calendar, tasks, account)
   usecase/         # Application business logic
   adapter/
     cli/           # Command handlers

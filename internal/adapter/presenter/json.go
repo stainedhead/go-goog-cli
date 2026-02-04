@@ -6,6 +6,7 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/domain/account"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 )
 
 // JSONPresenter formats output as indented JSON.
@@ -130,6 +131,32 @@ func (p *JSONPresenter) RenderAccounts(accts []*account.Account) string {
 		return "[]"
 	}
 	return p.marshalJSON(accts)
+}
+
+// RenderTaskList renders a single task list as JSON.
+func (p *JSONPresenter) RenderTaskList(taskList *domaintasks.TaskList) string {
+	return p.marshalJSON(taskList)
+}
+
+// RenderTaskLists renders multiple task lists as JSON.
+func (p *JSONPresenter) RenderTaskLists(taskLists []*domaintasks.TaskList) string {
+	if taskLists == nil {
+		return "[]"
+	}
+	return p.marshalJSON(taskLists)
+}
+
+// RenderTask renders a single task as JSON.
+func (p *JSONPresenter) RenderTask(task *domaintasks.Task) string {
+	return p.marshalJSON(task)
+}
+
+// RenderTasks renders multiple tasks as JSON.
+func (p *JSONPresenter) RenderTasks(tasks []*domaintasks.Task) string {
+	if tasks == nil {
+		return "[]"
+	}
+	return p.marshalJSON(tasks)
 }
 
 // errorResponse is the JSON structure for error output.

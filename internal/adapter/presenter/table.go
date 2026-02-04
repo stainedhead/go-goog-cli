@@ -8,6 +8,7 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/domain/account"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 )
 
 // TablePresenter formats output as ASCII tables.
@@ -484,6 +485,107 @@ func (p *TablePresenter) RenderAccounts(accts []*account.Account) string {
 			acct.Email,
 			isDefault,
 			fmt.Sprintf("%d", len(acct.Scopes)),
+		})
+	}
+
+	_ = table.Render()
+	return buf.String()
+}
+
+// RenderTaskList renders a single task list as a table.
+func (p *TablePresenter) RenderTaskList(taskList *domaintasks.TaskList) string {
+	if taskList == nil {
+		return "No task list found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"Field", "Value"})
+
+	_ = table.Append([]string{"ID", taskList.ID})
+	_ = table.Append([]string{"Title", taskList.Title})
+	_ = table.Append([]string{"Updated", taskList.Updated.Format("2006-01-02 15:04")})
+
+	_ = table.Render()
+	return buf.String()
+}
+
+// RenderTaskLists renders multiple task lists as a table.
+func (p *TablePresenter) RenderTaskLists(taskLists []*domaintasks.TaskList) string {
+	if len(taskLists) == 0 {
+		return "No task lists found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"ID", "Title", "Updated"})
+
+	for _, tl := range taskLists {
+		if tl == nil {
+			continue
+		}
+		_ = table.Append([]string{
+			truncate(tl.ID, 30),
+			truncate(tl.Title, 40),
+			tl.Updated.Format("2006-01-02 15:04"),
+		})
+	}
+
+	_ = table.Render()
+	return buf.String()
+}
+
+// RenderTask renders a single task as a table.
+func (p *TablePresenter) RenderTask(task *domaintasks.Task) string {
+	if task == nil {
+		return "No task found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"Field", "Value"})
+
+	_ = table.Append([]string{"ID", task.ID})
+	_ = table.Append([]string{"Title", task.Title})
+	_ = table.Append([]string{"Status", task.Status})
+	if task.Notes != "" {
+		_ = table.Append([]string{"Notes", truncate(task.Notes, 60)})
+	}
+	if task.Due != nil {
+		_ = table.Append([]string{"Due", task.Due.Format("2006-01-02")})
+	}
+	if task.Completed != nil {
+		_ = table.Append([]string{"Completed", task.Completed.Format("2006-01-02 15:04")})
+	}
+	if task.Parent != nil {
+		_ = table.Append([]string{"Parent", *task.Parent})
+	}
+	_ = table.Append([]string{"Updated", task.Updated.Format("2006-01-02 15:04")})
+
+	_ = table.Render()
+	return buf.String()
+}
+
+// RenderTasks renders multiple tasks as a table.
+func (p *TablePresenter) RenderTasks(tasks []*domaintasks.Task) string {
+	if len(tasks) == 0 {
+		return "No tasks found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"ID", "Title", "Status", "Due", "Updated"})
+
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		dueStr := ""
+		if task.Due != nil {
+			dueStr = task.Due.Format("2006-01-02")
+		}
+		_ = table.Append([]string{
+			truncate(task.ID, 20),
+			truncate(task.Title, 40),
+			task.Status,
+			dueStr,
+			task.Updated.Format("2006-01-02 15:04"),
 		})
 	}
 

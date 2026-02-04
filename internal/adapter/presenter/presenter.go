@@ -5,6 +5,7 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/domain/account"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 )
 
 // Format constants for presenter output types.
@@ -33,6 +34,12 @@ type Presenter interface {
 	RenderCalendars(cals []*calendar.Calendar) string
 	RenderACLRule(rule *calendar.ACLRule) string
 	RenderACLRules(rules []*calendar.ACLRule) string
+
+	// Tasks entities
+	RenderTaskList(taskList *domaintasks.TaskList) string
+	RenderTaskLists(taskLists []*domaintasks.TaskList) string
+	RenderTask(task *domaintasks.Task) string
+	RenderTasks(tasks []*domaintasks.Task) string
 
 	// Account
 	RenderAccount(acct *account.Account) string

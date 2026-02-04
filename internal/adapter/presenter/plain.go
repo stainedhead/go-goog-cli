@@ -7,6 +7,7 @@ import (
 	"github.com/stainedhead/go-goog-cli/internal/domain/account"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
+	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 )
 
 // PlainPresenter formats output as plain text, suitable for piping.
@@ -399,6 +400,93 @@ func (p *PlainPresenter) RenderAccounts(accts []*account.Account) string {
 			acct.Alias,
 			acct.Email,
 			len(acct.Scopes),
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// RenderTaskList renders a single task list as key-value pairs.
+func (p *PlainPresenter) RenderTaskList(taskList *domaintasks.TaskList) string {
+	if taskList == nil {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("ID: %s", taskList.ID))
+	lines = append(lines, fmt.Sprintf("Title: %s", taskList.Title))
+	lines = append(lines, fmt.Sprintf("Updated: %s", taskList.Updated.Format("2006-01-02 15:04:05")))
+
+	return strings.Join(lines, "\n")
+}
+
+// RenderTaskLists renders multiple task lists, one per line.
+func (p *PlainPresenter) RenderTaskLists(taskLists []*domaintasks.TaskList) string {
+	if len(taskLists) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, tl := range taskLists {
+		if tl == nil {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s\t%s\t%s",
+			tl.ID,
+			tl.Title,
+			tl.Updated.Format("2006-01-02 15:04:05"),
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// RenderTask renders a single task as key-value pairs.
+func (p *PlainPresenter) RenderTask(task *domaintasks.Task) string {
+	if task == nil {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("ID: %s", task.ID))
+	lines = append(lines, fmt.Sprintf("Title: %s", task.Title))
+	lines = append(lines, fmt.Sprintf("Status: %s", task.Status))
+	if task.Notes != "" {
+		lines = append(lines, fmt.Sprintf("Notes: %s", task.Notes))
+	}
+	if task.Due != nil {
+		lines = append(lines, fmt.Sprintf("Due: %s", task.Due.Format("2006-01-02")))
+	}
+	if task.Completed != nil {
+		lines = append(lines, fmt.Sprintf("Completed: %s", task.Completed.Format("2006-01-02 15:04:05")))
+	}
+	if task.Parent != nil {
+		lines = append(lines, fmt.Sprintf("Parent: %s", *task.Parent))
+	}
+	lines = append(lines, fmt.Sprintf("Updated: %s", task.Updated.Format("2006-01-02 15:04:05")))
+
+	return strings.Join(lines, "\n")
+}
+
+// RenderTasks renders multiple tasks, one per line.
+func (p *PlainPresenter) RenderTasks(tasks []*domaintasks.Task) string {
+	if len(tasks) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		dueStr := ""
+		if task.Due != nil {
+			dueStr = task.Due.Format("2006-01-02")
+		}
+		lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s\t%s",
+			task.ID,
+			task.Title,
+			task.Status,
+			dueStr,
+			task.Updated.Format("2006-01-02 15:04:05"),
 		))
 	}
 	return strings.Join(lines, "\n")
