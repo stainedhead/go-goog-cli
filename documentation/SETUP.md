@@ -5,11 +5,12 @@ This guide walks you through setting up OAuth2 credentials to use `goog` with yo
 ## Overview
 
 ```
-+------------------+     +-------------------+     +------------------+
-|  Google Cloud    |     |    goog CLI       |     |   Your Google    |
-|  Console         | --> |    Application    | --> |   Account        |
-|  (OAuth Setup)   |     |                   |     |   (Gmail/Cal)    |
-+------------------+     +-------------------+     +------------------+
++------------------+     +-------------------+     +---------------------+
+|  Google Cloud    |     |    goog CLI       |     |   Your Google       |
+|  Console         | --> |    Application    | --> |   Account           |
+|  (OAuth Setup)   |     |                   |     |   (Gmail/Cal/Tasks/ |
+|                  |     |                   |     |    Contacts)        |
++------------------+     +-------------------+     +---------------------+
         |                         |
         v                         v
   Client ID/Secret          Access Tokens
@@ -56,7 +57,7 @@ This guide walks you through setting up OAuth2 credentials to use `goog` with yo
 
 5. Wait for the project to be created (notification will appear), then select it.
 
-## Step 2: Enable Gmail and Calendar APIs
+## Step 2: Enable Gmail, Calendar, Tasks, and Contacts APIs
 
 1. In the Cloud Console, go to **"APIs & Services"** > **"Library"**
 
@@ -75,6 +76,8 @@ This guide walks you through setting up OAuth2 credentials to use `goog` with yo
    |-----|-------------|---------------|
    | Gmail API | `gmail api` | Click result → **"Enable"** |
    | Google Calendar API | `calendar api` | Click result → **"Enable"** |
+   | Google Tasks API | `tasks api` | Click result → **"Enable"** |
+   | Google People API | `people api` | Click result → **"Enable"** |
 
    ```
    +------------------------------------------+
@@ -84,6 +87,8 @@ This guide walks you through setting up OAuth2 credentials to use `goog` with yo
    |  email messages and labels               |
    +------------------------------------------+
    ```
+
+   **Note**: The People API provides access to Google Contacts.
 
 ## Step 3: Configure OAuth Consent Screen
 
@@ -123,6 +128,8 @@ This guide walks you through setting up OAuth2 credentials to use `goog` with yo
    | [x] .../auth/gmail.modify        Read/write access to Gmail      |
    | [x] .../auth/gmail.send          Send emails                     |
    | [x] .../auth/calendar            Full calendar access            |
+   | [x] .../auth/tasks               Full tasks access               |
+   | [x] .../auth/contacts            Full contacts access            |
    | [x] .../auth/userinfo.email      View email address              |
    +------------------------------------------------------------------+
    ```
@@ -132,6 +139,8 @@ This guide walks you through setting up OAuth2 credentials to use `goog` with yo
    https://www.googleapis.com/auth/gmail.modify
    https://www.googleapis.com/auth/gmail.send
    https://www.googleapis.com/auth/calendar
+   https://www.googleapis.com/auth/tasks
+   https://www.googleapis.com/auth/contacts
    https://www.googleapis.com/auth/userinfo.email
    ```
 
@@ -292,6 +301,12 @@ This will:
    |  [x] See, edit, share, and permanently delete    |
    |      all the calendars you can access            |
    |                                                  |
+   |  [x] Create, edit, organize, and delete all      |
+   |      your tasks                                  |
+   |                                                  |
+   |  [x] See, edit, download, and permanently        |
+   |      delete your contacts                        |
+   |                                                  |
    |  [x] See your primary Google Account email       |
    |      address                                     |
    |                                                  |
@@ -340,6 +355,8 @@ Expires: 2024-01-15 15:30:00 UTC
 Scopes:
   - https://www.googleapis.com/auth/gmail.modify
   - https://www.googleapis.com/auth/calendar
+  - https://www.googleapis.com/auth/tasks
+  - https://www.googleapis.com/auth/contacts
   - https://www.googleapis.com/auth/userinfo.email
 ```
 
@@ -351,6 +368,12 @@ goog mail list --max-results 5
 
 # Show today's calendar
 goog cal today
+
+# List tasks
+goog tasks list
+
+# List contacts
+goog contacts list --max-results 10
 ```
 
 ## Multi-Account Setup
@@ -362,7 +385,7 @@ Add additional accounts with aliases:
 goog auth login --account work
 
 # Add personal account with specific scopes
-goog auth login --account personal --scopes gmail.readonly,calendar
+goog auth login --account personal --scopes gmail.readonly,calendar,tasks,contacts.readonly
 
 # List all accounts
 goog account list
@@ -390,16 +413,25 @@ The `--scopes` flag accepts these shorthand values:
 | `calendar.readonly` | calendar.readonly | Read-only calendar |
 | `calendar.events` | calendar.events | Manage events only |
 | `calendar.full` | calendar | Full calendar access |
+| `tasks` | tasks.readonly | Read-only tasks |
+| `tasks.readonly` | tasks.readonly | Read-only tasks |
+| `tasks.full` | tasks | Full tasks access |
+| `contacts` | contacts.readonly | Read-only contacts |
+| `contacts.readonly` | contacts.readonly | Read-only contacts |
+| `contacts.full` | contacts | Full contacts access |
 
 ### Recommended Scope Combinations
 
 | Use Case | Scopes |
 |----------|--------|
-| Full access | `gmail.modify,calendar.full` (default) |
-| Read-only | `gmail.readonly,calendar.readonly` |
+| Full access (all services) | `gmail.modify,calendar.full,tasks.full,contacts.full` |
+| Read-only (all services) | `gmail.readonly,calendar.readonly,tasks.readonly,contacts.readonly` |
 | Email only | `gmail.modify` |
 | Calendar only | `calendar.full` |
-| AI agent (minimal) | `gmail.readonly,calendar.readonly` |
+| Tasks only | `tasks.full` |
+| Contacts only | `contacts.full` |
+| AI agent (minimal) | `gmail.readonly,calendar.readonly,tasks.readonly,contacts.readonly` |
+| Productivity suite | `gmail.modify,calendar.full,tasks.full` |
 
 ## Troubleshooting
 
@@ -473,4 +505,6 @@ For personal use, re-authenticating every 7 days is simpler than the verificatio
 - [Configure OAuth Consent Screen](https://developers.google.com/workspace/guides/configure-oauth-consent)
 - [Gmail API Scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)
 - [Calendar API Scopes](https://developers.google.com/workspace/calendar/api/auth)
+- [Tasks API Documentation](https://developers.google.com/tasks)
+- [People API (Contacts) Scopes](https://developers.google.com/people/api/rest/v1/people)
 - [Google Cloud Console](https://console.cloud.google.com/)
