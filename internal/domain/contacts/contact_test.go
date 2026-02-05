@@ -5,27 +5,15 @@ import (
 )
 
 func TestNewContact(t *testing.T) {
-	tests := []struct {
-		name    string
-		wantErr bool
-	}{
-		{
-			name:    "creates contact successfully",
-			wantErr: false,
-		},
+	contact := NewContact()
+	if contact == nil {
+		t.Error("NewContact() returned nil contact")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			contact, err := NewContact()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewContact() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && contact == nil {
-				t.Error("NewContact() returned nil contact")
-			}
-		})
+	if contact.Names == nil {
+		t.Error("NewContact() did not initialize Names slice")
+	}
+	if contact.EmailAddresses == nil {
+		t.Error("NewContact() did not initialize EmailAddresses slice")
 	}
 }
 
@@ -65,7 +53,7 @@ func TestContact_AddEmail(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			contact, _ := NewContact()
+			contact := NewContact()
 			err := contact.AddEmail(tt.email, tt.emailType, tt.primary)
 
 			if (err != nil) != tt.wantErr {
@@ -120,7 +108,7 @@ func TestContact_AddPhone(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			contact, _ := NewContact()
+			contact := NewContact()
 			err := contact.AddPhone(tt.phone, tt.phoneType, tt.primary)
 
 			if (err != nil) != tt.wantErr {
@@ -164,7 +152,7 @@ func TestContact_SetPrimaryEmail(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			contact, _ := NewContact()
+			contact := NewContact()
 			for _, email := range tt.emails {
 				contact.AddEmail(email, "work", false)
 			}

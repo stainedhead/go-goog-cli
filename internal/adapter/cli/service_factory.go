@@ -261,6 +261,38 @@ func getFreeBusyRepositoryFromDeps(ctx context.Context) (FreeBusyRepository, err
 	return repo, nil
 }
 
+// getContactRepositoryFromDeps creates a contact repository using injected dependencies.
+func getContactRepositoryFromDeps(ctx context.Context) (ContactRepository, error) {
+	tokenSource, err := getTokenSourceFromDeps(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	deps := GetDependencies()
+	repo, err := deps.RepoFactory.NewContactRepository(ctx, tokenSource)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create contact repository: %w", err)
+	}
+
+	return repo, nil
+}
+
+// getContactGroupRepositoryFromDeps creates a contact group repository using injected dependencies.
+func getContactGroupRepositoryFromDeps(ctx context.Context) (ContactGroupRepository, error) {
+	tokenSource, err := getTokenSourceFromDeps(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	deps := GetDependencies()
+	repo, err := deps.RepoFactory.NewContactGroupRepository(ctx, tokenSource)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create contact group repository: %w", err)
+	}
+
+	return repo, nil
+}
+
 // getAccountServiceFromDeps returns the account service using injected dependencies.
 // This function supports dependency injection for testing.
 func getAccountServiceFromDeps() AccountService {

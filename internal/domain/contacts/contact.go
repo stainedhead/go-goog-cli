@@ -152,7 +152,7 @@ type Date struct {
 }
 
 // NewContact creates a new contact
-func NewContact() (*Contact, error) {
+func NewContact() *Contact {
 	return &Contact{
 		Names:          []Name{},
 		Nicknames:      []Nickname{},
@@ -165,7 +165,7 @@ func NewContact() (*Contact, error) {
 		Photos:         []Photo{},
 		URLs:           []URL{},
 		Memberships:    []Membership{},
-	}, nil
+	}
 }
 
 // AddEmail adds an email address to the contact

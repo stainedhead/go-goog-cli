@@ -282,21 +282,9 @@ Specify the group resource name followed by one or more contact resource names.`
 
 func runContactsList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
-
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	opts := domaincontacts.ListOptions{
@@ -317,22 +305,11 @@ func runContactsList(cmd *cobra.Command, args []string) error {
 
 func runContactsGet(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	resourceName := args[0]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	contact, err := repo.Get(ctx, resourceName)
@@ -348,27 +325,12 @@ func runContactsGet(cmd *cobra.Command, args []string) error {
 
 func runContactsCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
-
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
+		return err
 	}
 
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
-	}
-
-	contact, err := domaincontacts.NewContact()
-	if err != nil {
-		return fmt.Errorf("failed to create contact: %w", err)
-	}
+	contact := domaincontacts.NewContact()
 
 	if contactsGivenName != "" || contactsFamilyName != "" {
 		contact.Names = []domaincontacts.Name{
@@ -412,22 +374,11 @@ func runContactsCreate(cmd *cobra.Command, args []string) error {
 
 func runContactsUpdate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	resourceName := args[0]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	contact, err := repo.Get(ctx, resourceName)
@@ -479,22 +430,11 @@ func runContactsUpdate(cmd *cobra.Command, args []string) error {
 
 func runContactsDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	resourceName := args[0]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	err = repo.Delete(ctx, resourceName)
@@ -510,22 +450,11 @@ func runContactsDelete(cmd *cobra.Command, args []string) error {
 
 func runContactsSearch(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	query := args[0]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	opts := domaincontacts.SearchOptions{
@@ -547,21 +476,9 @@ func runContactsSearch(cmd *cobra.Command, args []string) error {
 
 func runContactsGroups(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
-
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactGroupRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactGroupRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	groups, err := repo.List(ctx)
@@ -577,22 +494,11 @@ func runContactsGroups(cmd *cobra.Command, args []string) error {
 
 func runContactsGroupCreate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	name := args[0]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactGroupRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactGroupRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	group, err := domaincontacts.NewContactGroup(name)
@@ -613,22 +519,11 @@ func runContactsGroupCreate(cmd *cobra.Command, args []string) error {
 
 func runContactsGroupUpdate(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	resourceName := args[0]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactGroupRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactGroupRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	group, err := repo.Get(ctx, resourceName)
@@ -653,22 +548,11 @@ func runContactsGroupUpdate(cmd *cobra.Command, args []string) error {
 
 func runContactsGroupDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	resourceName := args[0]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactGroupRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactGroupRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	err = repo.Delete(ctx, resourceName)
@@ -684,22 +568,11 @@ func runContactsGroupDelete(cmd *cobra.Command, args []string) error {
 
 func runContactsGroupMembers(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	resourceName := args[0]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactGroupRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactGroupRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	opts := domaincontacts.ListOptions{
@@ -720,23 +593,12 @@ func runContactsGroupMembers(cmd *cobra.Command, args []string) error {
 
 func runContactsGroupAdd(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	groupResourceName := args[0]
 	contactResourceNames := args[1:]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactGroupRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactGroupRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	err = repo.AddMembers(ctx, groupResourceName, contactResourceNames)
@@ -752,23 +614,12 @@ func runContactsGroupAdd(cmd *cobra.Command, args []string) error {
 
 func runContactsGroupRemove(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	deps := GetDependencies()
 	groupResourceName := args[0]
 	contactResourceNames := args[1:]
 
-	account, err := deps.AccountService.ResolveAccount(accountFlag)
+	repo, err := getContactGroupRepositoryFromDeps(ctx)
 	if err != nil {
-		return fmt.Errorf("account resolution failed: %w", err)
-	}
-
-	tokenSource, err := deps.AccountService.GetTokenManager().GetTokenSource(ctx, account.Alias)
-	if err != nil {
-		return fmt.Errorf("failed to get token source: %w", err)
-	}
-
-	repo, err := deps.RepoFactory.NewContactGroupRepository(ctx, tokenSource)
-	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return err
 	}
 
 	err = repo.RemoveMembers(ctx, groupResourceName, contactResourceNames)
