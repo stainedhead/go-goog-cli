@@ -4,6 +4,7 @@ package presenter
 import (
 	"github.com/stainedhead/go-goog-cli/internal/domain/account"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
+	domaincontacts "github.com/stainedhead/go-goog-cli/internal/domain/contacts"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
 	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 )
@@ -40,6 +41,12 @@ type Presenter interface {
 	RenderTaskLists(taskLists []*domaintasks.TaskList) string
 	RenderTask(task *domaintasks.Task) string
 	RenderTasks(tasks []*domaintasks.Task) string
+
+	// Contacts entities
+	RenderContact(contact *domaincontacts.Contact) string
+	RenderContacts(contacts []*domaincontacts.Contact) string
+	RenderContactGroup(group *domaincontacts.ContactGroup) string
+	RenderContactGroups(groups []*domaincontacts.ContactGroup) string
 
 	// Account
 	RenderAccount(acct *account.Account) string

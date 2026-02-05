@@ -8,6 +8,7 @@ import (
 
 	"github.com/stainedhead/go-goog-cli/internal/adapter/repository"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
+	domaincontacts "github.com/stainedhead/go-goog-cli/internal/domain/contacts"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
 	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/auth"
@@ -129,6 +130,31 @@ type TaskRepository interface {
 	Clear(ctx context.Context, taskListID string) error
 }
 
+// ContactRepository defines operations for managing contacts.
+// This interface mirrors domaincontacts.ContactRepository for dependency injection.
+type ContactRepository interface {
+	List(ctx context.Context, opts domaincontacts.ListOptions) (*domaincontacts.ListResult[*domaincontacts.Contact], error)
+	Get(ctx context.Context, resourceName string) (*domaincontacts.Contact, error)
+	Create(ctx context.Context, contact *domaincontacts.Contact) (*domaincontacts.Contact, error)
+	Update(ctx context.Context, contact *domaincontacts.Contact, updateMask []string) (*domaincontacts.Contact, error)
+	Delete(ctx context.Context, resourceName string) error
+	Search(ctx context.Context, opts domaincontacts.SearchOptions) (*domaincontacts.ListResult[*domaincontacts.Contact], error)
+	BatchGet(ctx context.Context, resourceNames []string) ([]*domaincontacts.Contact, error)
+}
+
+// ContactGroupRepository defines operations for managing contact groups.
+// This interface mirrors domaincontacts.ContactGroupRepository for dependency injection.
+type ContactGroupRepository interface {
+	List(ctx context.Context) ([]*domaincontacts.ContactGroup, error)
+	Get(ctx context.Context, resourceName string) (*domaincontacts.ContactGroup, error)
+	Create(ctx context.Context, group *domaincontacts.ContactGroup) (*domaincontacts.ContactGroup, error)
+	Update(ctx context.Context, group *domaincontacts.ContactGroup) (*domaincontacts.ContactGroup, error)
+	Delete(ctx context.Context, resourceName string) error
+	ListMembers(ctx context.Context, resourceName string, opts domaincontacts.ListOptions) (*domaincontacts.ListResult[*domaincontacts.Contact], error)
+	AddMembers(ctx context.Context, groupResourceName string, contactResourceNames []string) error
+	RemoveMembers(ctx context.Context, groupResourceName string, contactResourceNames []string) error
+}
+
 // AccountService defines operations for managing user accounts.
 type AccountService interface {
 	List() ([]*accountuc.Account, error)
@@ -165,6 +191,10 @@ type RepositoryFactory interface {
 	// Tasks repositories
 	NewTaskListRepository(ctx context.Context, tokenSource oauth2.TokenSource) (TaskListRepository, error)
 	NewTaskRepository(ctx context.Context, tokenSource oauth2.TokenSource) (TaskRepository, error)
+
+	// Contacts repositories
+	NewContactRepository(ctx context.Context, tokenSource oauth2.TokenSource) (ContactRepository, error)
+	NewContactGroupRepository(ctx context.Context, tokenSource oauth2.TokenSource) (ContactGroupRepository, error)
 }
 
 // Dependencies holds all external dependencies required by CLI commands.
@@ -413,4 +443,22 @@ func (f *defaultRepositoryFactory) NewTaskRepository(ctx context.Context, tokenS
 		return nil, err
 	}
 	return repository.NewGTaskRepository(gtasksRepo), nil
+}
+
+// NewContactRepository creates a new contact repository.
+func (f *defaultRepositoryFactory) NewContactRepository(ctx context.Context, tokenSource oauth2.TokenSource) (ContactRepository, error) {
+	peopleRepo, err := repository.NewPeopleRepository(ctx, tokenSource)
+	if err != nil {
+		return nil, err
+	}
+	return repository.NewPeopleContactRepository(peopleRepo), nil
+}
+
+// NewContactGroupRepository creates a new contact group repository.
+func (f *defaultRepositoryFactory) NewContactGroupRepository(ctx context.Context, tokenSource oauth2.TokenSource) (ContactGroupRepository, error) {
+	peopleRepo, err := repository.NewPeopleRepository(ctx, tokenSource)
+	if err != nil {
+		return nil, err
+	}
+	return repository.NewPeopleGroupRepository(peopleRepo), nil
 }

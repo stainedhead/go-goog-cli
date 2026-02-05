@@ -6,6 +6,7 @@ import (
 
 	"github.com/stainedhead/go-goog-cli/internal/domain/account"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
+	domaincontacts "github.com/stainedhead/go-goog-cli/internal/domain/contacts"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
 	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 )
@@ -487,6 +488,194 @@ func (p *PlainPresenter) RenderTasks(tasks []*domaintasks.Task) string {
 			task.Status,
 			dueStr,
 			task.Updated.Format("2006-01-02 15:04:05"),
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// RenderContact renders a single contact.
+func (p *PlainPresenter) RenderContact(contact *domaincontacts.Contact) string {
+	if contact == nil {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("ResourceName: %s", contact.ResourceName))
+	lines = append(lines, fmt.Sprintf("Name: %s", contact.GetDisplayName()))
+
+	if len(contact.EmailAddresses) > 0 {
+		lines = append(lines, "Emails:")
+		for _, email := range contact.EmailAddresses {
+			typeStr := ""
+			if email.Type != "" {
+				typeStr = " (" + email.Type + ")"
+			}
+			primaryStr := ""
+			if email.Primary {
+				primaryStr = " [primary]"
+			}
+			lines = append(lines, fmt.Sprintf("  - %s%s%s", email.Value, typeStr, primaryStr))
+		}
+	}
+
+	if len(contact.PhoneNumbers) > 0 {
+		lines = append(lines, "Phones:")
+		for _, phone := range contact.PhoneNumbers {
+			typeStr := ""
+			if phone.Type != "" {
+				typeStr = " (" + phone.Type + ")"
+			}
+			primaryStr := ""
+			if phone.Primary {
+				primaryStr = " [primary]"
+			}
+			lines = append(lines, fmt.Sprintf("  - %s%s%s", phone.Value, typeStr, primaryStr))
+		}
+	}
+
+	if len(contact.Addresses) > 0 {
+		lines = append(lines, "Addresses:")
+		for _, addr := range contact.Addresses {
+			if addr.FormattedValue != "" {
+				typeStr := ""
+				if addr.Type != "" {
+					typeStr = " (" + addr.Type + ")"
+				}
+				lines = append(lines, fmt.Sprintf("  - %s%s", addr.FormattedValue, typeStr))
+			}
+		}
+	}
+
+	if len(contact.Organizations) > 0 {
+		lines = append(lines, "Organizations:")
+		for _, org := range contact.Organizations {
+			orgStr := org.Name
+			if org.Title != "" {
+				orgStr += " - " + org.Title
+			}
+			if org.Department != "" {
+				orgStr += " (" + org.Department + ")"
+			}
+			lines = append(lines, fmt.Sprintf("  - %s", orgStr))
+		}
+	}
+
+	if len(contact.Birthdays) > 0 {
+		if contact.Birthdays[0].Date != nil {
+			lines = append(lines, fmt.Sprintf("Birthday: %s", contact.Birthdays[0].Date.FormatDate()))
+		} else if contact.Birthdays[0].Text != "" {
+			lines = append(lines, fmt.Sprintf("Birthday: %s", contact.Birthdays[0].Text))
+		}
+	}
+
+	if len(contact.Biographies) > 0 && contact.Biographies[0].Value != "" {
+		lines = append(lines, fmt.Sprintf("Biography: %s", contact.Biographies[0].Value))
+	}
+
+	if len(contact.Nicknames) > 0 {
+		var nicknames []string
+		for _, nn := range contact.Nicknames {
+			nicknames = append(nicknames, nn.Value)
+		}
+		lines = append(lines, fmt.Sprintf("Nicknames: %s", strings.Join(nicknames, ", ")))
+	}
+
+	if len(contact.URLs) > 0 {
+		lines = append(lines, "URLs:")
+		for _, url := range contact.URLs {
+			typeStr := ""
+			if url.Type != "" {
+				typeStr = " (" + url.Type + ")"
+			}
+			lines = append(lines, fmt.Sprintf("  - %s%s", url.Value, typeStr))
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// RenderContacts renders multiple contacts.
+func (p *PlainPresenter) RenderContacts(contacts []*domaincontacts.Contact) string {
+	if len(contacts) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, c := range contacts {
+		if c == nil {
+			continue
+		}
+
+		name := c.GetDisplayName()
+
+		email := ""
+		if len(c.EmailAddresses) > 0 {
+			primaryEmail, err := c.GetPrimaryEmail()
+			if err == nil {
+				email = primaryEmail
+			}
+		}
+
+		phone := ""
+		if len(c.PhoneNumbers) > 0 {
+			for _, p := range c.PhoneNumbers {
+				if p.Primary {
+					phone = p.Value
+					break
+				}
+			}
+			if phone == "" && len(c.PhoneNumbers) > 0 {
+				phone = c.PhoneNumbers[0].Value
+			}
+		}
+
+		lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s",
+			c.ResourceName,
+			name,
+			email,
+			phone,
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// RenderContactGroup renders a single contact group.
+func (p *PlainPresenter) RenderContactGroup(group *domaincontacts.ContactGroup) string {
+	if group == nil {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("ResourceName: %s", group.ResourceName))
+	lines = append(lines, fmt.Sprintf("Name: %s", group.Name))
+	if group.FormattedName != "" {
+		lines = append(lines, fmt.Sprintf("FormattedName: %s", group.FormattedName))
+	}
+	lines = append(lines, fmt.Sprintf("Type: %s", group.GroupType))
+	lines = append(lines, fmt.Sprintf("MemberCount: %d", group.MemberCount))
+	if group.Metadata != nil && !group.Metadata.UpdateTime.IsZero() {
+		lines = append(lines, fmt.Sprintf("Updated: %s", group.Metadata.UpdateTime.Format("2006-01-02 15:04:05")))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// RenderContactGroups renders multiple contact groups.
+func (p *PlainPresenter) RenderContactGroups(groups []*domaincontacts.ContactGroup) string {
+	if len(groups) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, g := range groups {
+		if g == nil {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%d",
+			g.ResourceName,
+			g.Name,
+			g.GroupType,
+			g.MemberCount,
 		))
 	}
 	return strings.Join(lines, "\n")

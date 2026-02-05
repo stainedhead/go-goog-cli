@@ -209,6 +209,79 @@ Subtasks:
 - Use `--parent` flag when creating to make a subtask
 - Maximum 2000 subtasks per parent task
 
+### Contacts - Contacts
+
+List and search:
+```bash
+goog contacts list                       # List all contacts
+goog contacts list --max-results 50      # Limit results
+goog contacts list --page-token xyz      # Pagination
+goog contacts search "John"              # Search by name
+goog contacts search "john@example.com"  # Search by email
+```
+
+Get and view:
+```bash
+goog contacts get people/c123456         # Get contact details
+```
+
+Create and update:
+```bash
+goog contacts create --given-name "John" --family-name "Doe"
+goog contacts create --given-name "Jane" --family-name "Smith" \
+  --email "jane@example.com" --email-type work \
+  --phone "+1-555-0123" --phone-type mobile \
+  --organization "Acme Corp" --title "Senior Engineer" \
+  --address "123 Main St, City, ST 12345" --address-type home \
+  --birthday "1990-05-15" --notes "Met at conference" \
+  --url "https://linkedin.com/in/janesmith"
+
+goog contacts update people/c123456 --email "newemail@example.com"
+goog contacts update people/c123456 --given-name "Jonathan"
+goog contacts delete people/c123456 --confirm
+```
+
+Contact fields:
+- **Name**: given name, family name, middle name, prefix, suffix
+- **Email**: multiple emails with types (home, work, other)
+- **Phone**: multiple phones with types (mobile, home, work, other)
+- **Address**: street, city, region, postal code, country
+- **Organization**: company name, title, department
+- **Birthday**: date in YYYY-MM-DD format
+- **Notes**: biographical information
+- **URL**: website or profile link
+
+### Contacts - Contact Groups
+
+List and view:
+```bash
+goog contacts groups                     # List all groups
+goog contacts group-members contactGroups/g123  # List group members
+```
+
+Create and update:
+```bash
+goog contacts group-create "Family"      # Create group
+goog contacts group-create "Work Contacts"
+goog contacts group-update contactGroups/g123 --name "Close Friends"
+goog contacts group-delete contactGroups/g123 --confirm
+```
+
+Manage membership:
+```bash
+goog contacts group-add contactGroups/g123 people/c456        # Add one contact
+goog contacts group-add contactGroups/g123 people/c456 people/c789  # Add multiple
+goog contacts group-remove contactGroups/g123 people/c456    # Remove contact
+```
+
+Group types:
+- **User groups**: Custom groups created by the user (can modify)
+- **System groups**: Built-in groups like "myContacts", "starred" (read-only)
+
+Resource names:
+- Contacts: `people/c<id>` (e.g., `people/c123456789012345678`)
+- Groups: `contactGroups/<id>` (e.g., `contactGroups/myContacts`)
+
 ## Output Formats
 
 | Format | Flag | Use Case |
@@ -241,9 +314,18 @@ goog tasks complete abc123             # Mark done
 goog tasks clear --confirm             # Clean up completed
 ```
 
+### Contact Management
+```bash
+goog contacts search "john"            # Find contact
+goog contacts get people/c123456       # View details
+goog contacts create --given-name "New" --family-name "Contact" --email "new@example.com"
+goog contacts group-add contactGroups/family people/c123456  # Add to group
+```
+
 ### Automated Notifications (AI Agent)
 ```bash
 goog mail search "from:alerts@system.com" --format json | jq ...
 goog cal today --format json | jq ...
 goog tasks list --format json | jq ...
+goog contacts search "john" --format json | jq ...
 ```

@@ -5,6 +5,7 @@ import (
 
 	"github.com/stainedhead/go-goog-cli/internal/domain/account"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
+	domaincontacts "github.com/stainedhead/go-goog-cli/internal/domain/contacts"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
 	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 )
@@ -167,6 +168,32 @@ type errorResponse struct {
 // successResponse is the JSON structure for success output.
 type successResponse struct {
 	Message string `json:"message"`
+}
+
+// RenderContact renders a single contact as JSON.
+func (p *JSONPresenter) RenderContact(contact *domaincontacts.Contact) string {
+	return p.marshalJSON(contact)
+}
+
+// RenderContacts renders multiple contacts as JSON.
+func (p *JSONPresenter) RenderContacts(contacts []*domaincontacts.Contact) string {
+	if contacts == nil {
+		return "[]"
+	}
+	return p.marshalJSON(contacts)
+}
+
+// RenderContactGroup renders a single contact group as JSON.
+func (p *JSONPresenter) RenderContactGroup(group *domaincontacts.ContactGroup) string {
+	return p.marshalJSON(group)
+}
+
+// RenderContactGroups renders multiple contact groups as JSON.
+func (p *JSONPresenter) RenderContactGroups(groups []*domaincontacts.ContactGroup) string {
+	if groups == nil {
+		return "[]"
+	}
+	return p.marshalJSON(groups)
 }
 
 // RenderError renders an error as JSON.

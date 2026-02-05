@@ -1,8 +1,8 @@
 # goog
 
-A command-line interface for Google Mail, Calendar, and Tasks, built with Go.
+A command-line interface for Google Mail, Calendar, Tasks, and Contacts, built with Go.
 
-Designed for both human operators and AI agents, `goog` provides programmatic access to Gmail, Google Calendar, and Google Tasks through a clean, scriptable interface.
+Designed for both human operators and AI agents, `goog` provides programmatic access to Gmail, Google Calendar, Google Tasks, and Google Contacts through a clean, scriptable interface.
 
 ## Features
 
@@ -10,6 +10,7 @@ Designed for both human operators and AI agents, `goog` provides programmatic ac
 - **Gmail integration** - List, read, send, reply, forward, and manage messages
 - **Calendar integration** - Events, calendars, sharing, and availability queries
 - **Tasks integration** - Manage task lists and tasks with full CRUD operations
+- **Contacts integration** - Manage contacts and contact groups with full CRUD operations
 - **Flexible output** - JSON, table, and plain text formats
 - **Secure credentials** - OAuth2 tokens stored in system keyring
 
@@ -55,6 +56,12 @@ goog tasks list
 
 # Create a task
 goog tasks create "Buy groceries" --due "2024-12-31"
+
+# List contacts
+goog contacts list
+
+# Search contacts
+goog contacts search "john@example.com"
 
 # Create an event
 goog cal create --title "Meeting" --start "tomorrow 2pm" --end "tomorrow 3pm"
@@ -170,6 +177,29 @@ goog cal share <calendar-id>              # Share calendar (alias)
 goog cal unshare <calendar-id> <rule>     # Unshare calendar (alias)
 ```
 
+### Contacts
+
+```bash
+goog contacts list               # List all contacts
+goog contacts get <id>           # Get contact details
+goog contacts search <query>     # Search contacts
+goog contacts create             # Create new contact
+goog contacts update <id>        # Update contact
+goog contacts delete <id>        # Delete contact (--confirm required)
+```
+
+### Contact Groups
+
+```bash
+goog contacts groups             # List all contact groups
+goog contacts group-create <name>     # Create contact group
+goog contacts group-update <id>       # Update contact group
+goog contacts group-delete <id>       # Delete contact group (--confirm required)
+goog contacts group-members <id>      # List group members
+goog contacts group-add <group-id> <contact-ids...>    # Add contacts to group
+goog contacts group-remove <group-id> <contact-ids...> # Remove contacts from group
+```
+
 ## Global Flags
 
 | Flag | Description |
@@ -267,6 +297,53 @@ goog tasks delete task-id --confirm
 goog tasks clear --confirm
 ```
 
+### Contacts
+
+```bash
+# List contacts
+goog contacts list --max-results 50
+
+# Search for contacts
+goog contacts search "john@example.com"
+goog contacts search "Smith"
+
+# Create a contact with name
+goog contacts create --given-name "John" --family-name "Doe"
+
+# Create a contact with full details
+goog contacts create --given-name "Jane" --family-name "Smith" \
+  --email "jane@example.com" --email-type work \
+  --phone "+1-555-0123" --phone-type mobile \
+  --organization "Acme Corp" --title "Senior Engineer"
+
+# Get contact details
+goog contacts get people/c123456
+
+# Update a contact
+goog contacts update people/c123456 --email "newemail@example.com"
+
+# Delete a contact
+goog contacts delete people/c123456 --confirm
+
+# List contact groups
+goog contacts groups
+
+# Create contact group
+goog contacts group-create "Work Contacts"
+
+# Add contacts to a group
+goog contacts group-add contactGroups/g123 people/c456 people/c789
+
+# Remove contacts from a group
+goog contacts group-remove contactGroups/g123 people/c456
+
+# List members of a group
+goog contacts group-members contactGroups/g123
+
+# Delete a contact group
+goog contacts group-delete contactGroups/g123 --confirm
+```
+
 ### JSON Output for Scripting
 
 ```bash
@@ -282,7 +359,7 @@ goog cal today --format json
 ```
 cmd/goog/          # Application entry point
 internal/
-  domain/          # Business entities (mail, calendar, tasks, account)
+  domain/          # Business entities (mail, calendar, tasks, contacts, account)
   usecase/         # Application business logic
   adapter/
     cli/           # Command handlers
@@ -317,7 +394,7 @@ This project maintains high code quality standards with comprehensive test cover
 
 | Package | Coverage | Status |
 |---------|----------|--------|
-| **Domain** (account, calendar, mail) | 100% | ✅ Perfect |
+| **Domain** (account, calendar, mail, tasks, contacts) | 94-100% | ✅ Perfect |
 | **Infrastructure** (auth, keyring) | 91-93% | ✅ Excellent |
 | **Adapter** (CLI, presenter, repository) | 84-94% | ✅ Very Good |
 | **Use Case** (account management) | 91% | ✅ Excellent |

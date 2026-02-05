@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
+	domaincontacts "github.com/stainedhead/go-goog-cli/internal/domain/contacts"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
 	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 	"github.com/stainedhead/go-goog-cli/internal/infrastructure/auth"
@@ -828,28 +829,159 @@ func (m *MockTaskRepository) Clear(ctx context.Context, taskListID string) error
 	return m.ClearErr
 }
 
+// MockContactRepository implements ContactRepository for testing.
+type MockContactRepository struct {
+	Contacts     *domaincontacts.ListResult[*domaincontacts.Contact]
+	Contact      *domaincontacts.Contact
+	ListErr      error
+	GetErr       error
+	CreateErr    error
+	UpdateErr    error
+	DeleteErr    error
+	SearchErr    error
+	SearchResult *domaincontacts.ListResult[*domaincontacts.Contact]
+}
+
+func (m *MockContactRepository) List(ctx context.Context, opts domaincontacts.ListOptions) (*domaincontacts.ListResult[*domaincontacts.Contact], error) {
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	if m.Contacts != nil {
+		return m.Contacts, nil
+	}
+	return &domaincontacts.ListResult[*domaincontacts.Contact]{Items: []*domaincontacts.Contact{}}, nil
+}
+
+func (m *MockContactRepository) Get(ctx context.Context, resourceName string) (*domaincontacts.Contact, error) {
+	if m.GetErr != nil {
+		return nil, m.GetErr
+	}
+	return m.Contact, nil
+}
+
+func (m *MockContactRepository) Create(ctx context.Context, contact *domaincontacts.Contact) (*domaincontacts.Contact, error) {
+	if m.CreateErr != nil {
+		return nil, m.CreateErr
+	}
+	return contact, nil
+}
+
+func (m *MockContactRepository) Update(ctx context.Context, contact *domaincontacts.Contact, updateMask []string) (*domaincontacts.Contact, error) {
+	if m.UpdateErr != nil {
+		return nil, m.UpdateErr
+	}
+	return contact, nil
+}
+
+func (m *MockContactRepository) Delete(ctx context.Context, resourceName string) error {
+	return m.DeleteErr
+}
+
+func (m *MockContactRepository) Search(ctx context.Context, opts domaincontacts.SearchOptions) (*domaincontacts.ListResult[*domaincontacts.Contact], error) {
+	if m.SearchErr != nil {
+		return nil, m.SearchErr
+	}
+	if m.SearchResult != nil {
+		return m.SearchResult, nil
+	}
+	return &domaincontacts.ListResult[*domaincontacts.Contact]{Items: []*domaincontacts.Contact{}}, nil
+}
+
+func (m *MockContactRepository) BatchGet(ctx context.Context, resourceNames []string) ([]*domaincontacts.Contact, error) {
+	return []*domaincontacts.Contact{}, nil
+}
+
+// MockContactGroupRepository implements ContactGroupRepository for testing.
+type MockContactGroupRepository struct {
+	Groups           []*domaincontacts.ContactGroup
+	Group            *domaincontacts.ContactGroup
+	Members          *domaincontacts.ListResult[*domaincontacts.Contact]
+	ListErr          error
+	GetErr           error
+	CreateErr        error
+	UpdateErr        error
+	DeleteErr        error
+	ListMembersErr   error
+	AddMembersErr    error
+	RemoveMembersErr error
+}
+
+func (m *MockContactGroupRepository) List(ctx context.Context) ([]*domaincontacts.ContactGroup, error) {
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	return m.Groups, nil
+}
+
+func (m *MockContactGroupRepository) Get(ctx context.Context, resourceName string) (*domaincontacts.ContactGroup, error) {
+	if m.GetErr != nil {
+		return nil, m.GetErr
+	}
+	return m.Group, nil
+}
+
+func (m *MockContactGroupRepository) Create(ctx context.Context, group *domaincontacts.ContactGroup) (*domaincontacts.ContactGroup, error) {
+	if m.CreateErr != nil {
+		return nil, m.CreateErr
+	}
+	return group, nil
+}
+
+func (m *MockContactGroupRepository) Update(ctx context.Context, group *domaincontacts.ContactGroup) (*domaincontacts.ContactGroup, error) {
+	if m.UpdateErr != nil {
+		return nil, m.UpdateErr
+	}
+	return group, nil
+}
+
+func (m *MockContactGroupRepository) Delete(ctx context.Context, resourceName string) error {
+	return m.DeleteErr
+}
+
+func (m *MockContactGroupRepository) ListMembers(ctx context.Context, resourceName string, opts domaincontacts.ListOptions) (*domaincontacts.ListResult[*domaincontacts.Contact], error) {
+	if m.ListMembersErr != nil {
+		return nil, m.ListMembersErr
+	}
+	if m.Members != nil {
+		return m.Members, nil
+	}
+	return &domaincontacts.ListResult[*domaincontacts.Contact]{Items: []*domaincontacts.Contact{}}, nil
+}
+
+func (m *MockContactGroupRepository) AddMembers(ctx context.Context, groupResourceName string, contactResourceNames []string) error {
+	return m.AddMembersErr
+}
+
+func (m *MockContactGroupRepository) RemoveMembers(ctx context.Context, groupResourceName string, contactResourceNames []string) error {
+	return m.RemoveMembersErr
+}
+
 // MockRepositoryFactory implements RepositoryFactory for testing.
 type MockRepositoryFactory struct {
-	MessageRepo  MessageRepository
-	DraftRepo    DraftRepository
-	ThreadRepo   ThreadRepository
-	LabelRepo    LabelRepository
-	EventRepo    EventRepository
-	CalendarRepo CalendarRepository
-	ACLRepo      ACLRepository
-	FreeBusyRepo FreeBusyRepository
-	TaskListRepo TaskListRepository
-	TaskRepo     TaskRepository
-	MessageErr   error
-	DraftErr     error
-	ThreadErr    error
-	LabelErr     error
-	EventErr     error
-	CalendarErr  error
-	ACLErr       error
-	FreeBusyErr  error
-	TaskListErr  error
-	TaskErr      error
+	MessageRepo      MessageRepository
+	DraftRepo        DraftRepository
+	ThreadRepo       ThreadRepository
+	LabelRepo        LabelRepository
+	EventRepo        EventRepository
+	CalendarRepo     CalendarRepository
+	ACLRepo          ACLRepository
+	FreeBusyRepo     FreeBusyRepository
+	TaskListRepo     TaskListRepository
+	TaskRepo         TaskRepository
+	ContactRepo      ContactRepository
+	ContactGroupRepo ContactGroupRepository
+	MessageErr       error
+	DraftErr         error
+	ThreadErr        error
+	LabelErr         error
+	EventErr         error
+	CalendarErr      error
+	ACLErr           error
+	FreeBusyErr      error
+	TaskListErr      error
+	TaskErr          error
+	ContactErr       error
+	ContactGroupErr  error
 }
 
 func (f *MockRepositoryFactory) NewMessageRepository(ctx context.Context, tokenSource oauth2.TokenSource) (MessageRepository, error) {
@@ -950,6 +1082,26 @@ func (f *MockRepositoryFactory) NewTaskRepository(ctx context.Context, tokenSour
 		return &MockTaskRepository{}, nil
 	}
 	return f.TaskRepo, nil
+}
+
+func (f *MockRepositoryFactory) NewContactRepository(ctx context.Context, tokenSource oauth2.TokenSource) (ContactRepository, error) {
+	if f.ContactErr != nil {
+		return nil, f.ContactErr
+	}
+	if f.ContactRepo == nil {
+		return &MockContactRepository{}, nil
+	}
+	return f.ContactRepo, nil
+}
+
+func (f *MockRepositoryFactory) NewContactGroupRepository(ctx context.Context, tokenSource oauth2.TokenSource) (ContactGroupRepository, error) {
+	if f.ContactGroupErr != nil {
+		return nil, f.ContactGroupErr
+	}
+	if f.ContactGroupRepo == nil {
+		return &MockContactGroupRepository{}, nil
+	}
+	return f.ContactGroupRepo, nil
 }
 
 // NewTestDependencies creates a Dependencies instance with all mock implementations.

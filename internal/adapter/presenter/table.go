@@ -7,6 +7,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/stainedhead/go-goog-cli/internal/domain/account"
 	"github.com/stainedhead/go-goog-cli/internal/domain/calendar"
+	domaincontacts "github.com/stainedhead/go-goog-cli/internal/domain/contacts"
 	"github.com/stainedhead/go-goog-cli/internal/domain/mail"
 	domaintasks "github.com/stainedhead/go-goog-cli/internal/domain/tasks"
 )
@@ -35,6 +36,18 @@ func createTable(buf *strings.Builder, headers []string) *tablewriter.Table {
 	table := tablewriter.NewTable(buf)
 	table.Header(headers)
 	return table
+}
+
+// formatFieldWithTypeAndPrimary formats a value with optional type and primary markers.
+func formatFieldWithTypeAndPrimary(value, fieldType string, primary bool) string {
+	result := value
+	if fieldType != "" {
+		result += " (" + fieldType + ")"
+	}
+	if primary {
+		result += " [primary]"
+	}
+	return result
 }
 
 // RenderMessage renders a single message as a table.
@@ -586,6 +599,180 @@ func (p *TablePresenter) RenderTasks(tasks []*domaintasks.Task) string {
 			task.Status,
 			dueStr,
 			task.Updated.Format("2006-01-02 15:04"),
+		})
+	}
+
+	_ = table.Render()
+	return buf.String()
+}
+
+// RenderContact renders a single contact as a table.
+func (p *TablePresenter) RenderContact(contact *domaincontacts.Contact) string {
+	if contact == nil {
+		return "No contact found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"Field", "Value"})
+
+	_ = table.Append([]string{"ResourceName", contact.ResourceName})
+	_ = table.Append([]string{"Name", contact.GetDisplayName()})
+
+	if len(contact.EmailAddresses) > 0 {
+		var emails []string
+		for _, email := range contact.EmailAddresses {
+			emails = append(emails, formatFieldWithTypeAndPrimary(email.Value, email.Type, email.Primary))
+		}
+		_ = table.Append([]string{"Emails", strings.Join(emails, "\n")})
+	}
+
+	if len(contact.PhoneNumbers) > 0 {
+		var phones []string
+		for _, phone := range contact.PhoneNumbers {
+			phones = append(phones, formatFieldWithTypeAndPrimary(phone.Value, phone.Type, phone.Primary))
+		}
+		_ = table.Append([]string{"Phones", strings.Join(phones, "\n")})
+	}
+
+	if len(contact.Addresses) > 0 {
+		var addresses []string
+		for _, addr := range contact.Addresses {
+			if addr.FormattedValue != "" {
+				typeStr := ""
+				if addr.Type != "" {
+					typeStr = " (" + addr.Type + ")"
+				}
+				addresses = append(addresses, addr.FormattedValue+typeStr)
+			}
+		}
+		if len(addresses) > 0 {
+			_ = table.Append([]string{"Addresses", strings.Join(addresses, "\n")})
+		}
+	}
+
+	if len(contact.Organizations) > 0 {
+		var orgs []string
+		for _, org := range contact.Organizations {
+			orgStr := org.Name
+			if org.Title != "" {
+				orgStr += " - " + org.Title
+			}
+			if org.Department != "" {
+				orgStr += " (" + org.Department + ")"
+			}
+			orgs = append(orgs, orgStr)
+		}
+		_ = table.Append([]string{"Organizations", strings.Join(orgs, "\n")})
+	}
+
+	if len(contact.Birthdays) > 0 {
+		if contact.Birthdays[0].Date != nil {
+			_ = table.Append([]string{"Birthday", contact.Birthdays[0].Date.FormatDate()})
+		} else if contact.Birthdays[0].Text != "" {
+			_ = table.Append([]string{"Birthday", contact.Birthdays[0].Text})
+		}
+	}
+
+	if len(contact.Biographies) > 0 && contact.Biographies[0].Value != "" {
+		_ = table.Append([]string{"Biography", truncate(contact.Biographies[0].Value, 60)})
+	}
+
+	if contact.ETag != "" {
+		_ = table.Append([]string{"ETag", contact.ETag})
+	}
+
+	_ = table.Render()
+	return buf.String()
+}
+
+// RenderContacts renders multiple contacts as a table.
+func (p *TablePresenter) RenderContacts(contacts []*domaincontacts.Contact) string {
+	if len(contacts) == 0 {
+		return "No contacts found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"ResourceName", "Name", "Email", "Phone"})
+
+	for _, c := range contacts {
+		if c == nil {
+			continue
+		}
+
+		name := c.GetDisplayName()
+
+		email, _ := c.GetPrimaryEmail()
+
+		phone := ""
+		if len(c.PhoneNumbers) > 0 {
+			for _, p := range c.PhoneNumbers {
+				if p.Primary {
+					phone = p.Value
+					break
+				}
+			}
+			if phone == "" {
+				phone = c.PhoneNumbers[0].Value
+			}
+		}
+
+		_ = table.Append([]string{
+			truncate(c.ResourceName, 25),
+			truncate(name, 30),
+			truncate(email, 30),
+			truncate(phone, 20),
+		})
+	}
+
+	_ = table.Render()
+	return buf.String()
+}
+
+// RenderContactGroup renders a single contact group as a table.
+func (p *TablePresenter) RenderContactGroup(group *domaincontacts.ContactGroup) string {
+	if group == nil {
+		return "No contact group found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"Field", "Value"})
+
+	_ = table.Append([]string{"ResourceName", group.ResourceName})
+	_ = table.Append([]string{"Name", group.Name})
+	if group.FormattedName != "" {
+		_ = table.Append([]string{"Formatted Name", group.FormattedName})
+	}
+	_ = table.Append([]string{"Type", group.GroupType})
+	_ = table.Append([]string{"Member Count", fmt.Sprintf("%d", group.MemberCount)})
+	if group.ETag != "" {
+		_ = table.Append([]string{"ETag", group.ETag})
+	}
+	if group.Metadata != nil && !group.Metadata.UpdateTime.IsZero() {
+		_ = table.Append([]string{"Updated", group.Metadata.UpdateTime.Format("2006-01-02 15:04")})
+	}
+
+	_ = table.Render()
+	return buf.String()
+}
+
+// RenderContactGroups renders multiple contact groups as a table.
+func (p *TablePresenter) RenderContactGroups(groups []*domaincontacts.ContactGroup) string {
+	if len(groups) == 0 {
+		return "No contact groups found"
+	}
+
+	var buf strings.Builder
+	table := createTable(&buf, []string{"ResourceName", "Name", "Type", "MemberCount"})
+
+	for _, g := range groups {
+		if g == nil {
+			continue
+		}
+		_ = table.Append([]string{
+			truncate(g.ResourceName, 30),
+			truncate(g.Name, 30),
+			g.GroupType,
+			fmt.Sprintf("%d", g.MemberCount),
 		})
 	}
 

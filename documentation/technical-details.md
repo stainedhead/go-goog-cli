@@ -17,7 +17,7 @@ Dependencies flow inward only. Inner layers define interfaces; outer layers impl
 ### Layer Responsibilities
 
 **Domain** (`internal/domain/`)
-- Pure business entities: `Mail`, `Calendar`, `Tasks`, `Account`
+- Pure business entities: `Mail`, `Calendar`, `Tasks`, `Contacts`, `Account`
 - Business rules and validation
 - No external dependencies
 
@@ -93,6 +93,27 @@ goog auth login
 | TaskLists | list, get, insert, update, delete |
 | Tasks | list, get, insert, update, delete, move, clear |
 
+### People API (Contacts)
+
+| Category | Operations |
+|----------|------------|
+| Contacts | list, get, create, update, delete, search |
+| ContactGroups | list, get, create, update, delete, members |
+| Memberships | modify (add/remove contacts to/from groups) |
+
+**Architecture Pattern**: Contacts follows the Tasks pattern (simple CRUD, no use case layer).
+
+**API Details**:
+- Uses Google People API v1
+- Person resource fields: names, emailAddresses, phoneNumbers, addresses, organizations, birthdays, biographies, photos, urls, memberships, metadata
+- ContactGroup resource fields: name, groupType, memberCount, memberResourceNames, metadata
+- Resource names: `people/c<id>` for contacts, `contactGroups/<id>` for groups
+
+**Data Transformations**:
+- API to Domain: `PeopleRepository` transforms `people.Person` to `contacts.Contact`
+- Domain to API: Transform functions convert domain entities to People API structures
+- Handles nested structures (names, emails, phones, addresses, etc.)
+
 ## Configuration
 
 Config file location: `~/.config/goog/config.yaml`
@@ -154,6 +175,14 @@ Keyring entries per account:
 | `tasks.readonly` | Read-only tasks access |
 | `tasks` | Full tasks access |
 
+### Contacts Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `contacts.readonly` | Read-only contacts access |
+| `contacts.other.readonly` | Read access to other contacts data |
+| `contacts` | Full contacts access (read/write) |
+
 ## Error Handling
 
 Errors are wrapped with context using `fmt.Errorf("context: %w", err)`:
@@ -187,6 +216,7 @@ go test -v ./internal/adapter/cli  # Specific package
 | **domain/calendar** | 100% | 45 | ✅ Perfect |
 | **domain/mail** | 100% | 38 | ✅ Perfect |
 | **domain/tasks** | 100% | 14 | ✅ Perfect |
+| **domain/contacts** | 94.5% | 12 | ✅ Excellent |
 | **infrastructure/auth** | 93.3% | 25 | ✅ Excellent |
 | **infrastructure/keyring** | 91.3% | 18 | ✅ Excellent |
 | **infrastructure/config** | 80.1% | 12 | ✅ Good |
@@ -227,13 +257,14 @@ go test -v ./internal/adapter/cli  # Specific package
 │   │   ├── account/               # Account entity
 │   │   ├── mail/                  # Message, Draft, Label, Thread
 │   │   ├── calendar/              # Event, Calendar, ACL, FreeBusy
-│   │   └── tasks/                 # Task, TaskList
+│   │   ├── tasks/                 # Task, TaskList
+│   │   └── contacts/              # Contact, ContactGroup
 │   ├── usecase/
 │   │   └── account/               # Account service, OAuth flow
 │   ├── adapter/
 │   │   ├── cli/                   # Command handlers
 │   │   ├── presenter/             # JSON, Table, Plain formatters
-│   │   └── repository/            # Gmail, Calendar, Tasks repositories
+│   │   └── repository/            # Gmail, Calendar, Tasks, People repositories
 │   └── infrastructure/
 │       ├── auth/                  # OAuth2/PKCE, token management
 │       ├── config/                # Viper configuration

@@ -40,6 +40,11 @@ const (
 	ScopeTasksReadonly = "https://www.googleapis.com/auth/tasks.readonly"
 	ScopeTasks         = "https://www.googleapis.com/auth/tasks"
 
+	// Contacts scopes
+	ScopeContactsReadonly = "https://www.googleapis.com/auth/contacts.readonly"
+	ScopeContactsOther    = "https://www.googleapis.com/auth/contacts.other.readonly"
+	ScopeContacts         = "https://www.googleapis.com/auth/contacts"
+
 	// Drive scopes
 	ScopeDriveReadonly = "https://www.googleapis.com/auth/drive.readonly"
 	ScopeDriveFile     = "https://www.googleapis.com/auth/drive.file"
